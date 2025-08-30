@@ -1,191 +1,206 @@
+import network
 import socket
-import dht
+from time import sleep, ticks_ms
 import machine
-from machine import Timer
-import time
+import select
+import ujson
+from dht import DHT22
 
+# Configuración de pines
+LED_PIN = 2
+DHT_PIN = 13
+led = machine.Pin(LED_PIN, machine.Pin.OUT)
+dht_sensor = DHT22(machine.Pin(DHT_PIN))
+boot_button = machine.Pin(0, machine.Pin.IN)
 
-dht22 = dht.DHT22(machine.Pin(13))
-period = 3000
+# Frecuencia de lectura inicial en milisegundos (10 segundos)
+reading_frequency = 10000
+last_reading_time = 0
+humidity = -1.0
+temperature = -1.0
 
-temperature_value = '00'
-humidity_value = '00'
-
-
-tim1 = Timer(1)
-tim1.init(period=period, mode=Timer.PERIODIC, callback=lambda t:
-    get_dht22_values()
-)
-
-def get_dht22_values():
-    global temperature_value
-    global humidity_value
-
-    dht22.measure()
-    temperature = dht22.temperature() # eg. 23.6 (°C)
-    humidity = dht22.humidity()    # eg. 41.3 (% RH)
-
-    temperature_value = get_string_value(temperature)   
-    humidity_value = get_string_value(humidity)
-    
-
-
-
-def get_string_value(input: int):    
-        return str(round(input,1))  
-
-def web_page():
-    
-  
-    html = """
-<html>
-<head>
-    <title>ESP32 Web Server</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
-    <link rel="icon" href="data:,">
-    <style>
-        meter {
-            -webkit-writing-mode: horizontal-tb !important;
-            appearance: auto;
-            box-sizing: border-box;
-            display: inline-block;
-            height: 3em;
-            width: 13em;
-            vertical-align: -1.0em;
-            -webkit-user-modify: read-only !important;
-        }
-        html {
-            font-family: Helvetica;
-            display: inline-block;
-            margin: 0px auto;
-            text-align: center;
-        }
-        h1 {
-            color: #0F3376;
-            padding: 2vh;
-        }
-        p {
-            font-size: 1.5rem;
-        }
-        table {
-            margin: auto;
-        }
-        td {
-            padding: 3px;
-            display: inline-block;
-        }
-        .Button {
-            border-radius: 31px;
-            display: inline-block;
-            cursor: pointer;
-            color: #ffffff;
-            font-family: Arial;
-            font-size: 10px;
-            font-weight: bold;
-            font-style: italic;
-            padding: 4px 5px;
-            text-decoration: none;
-        }
-        .ButtonR {
-            background-color: #9549ec;
-            border: 3px solid #6c1f99;
-            text-shadow: 0px 2px 2px #3b1e47;
-        }
-        .ButtonR:hover {
-            background-color: #c816f5;
-        }
-        .Button:active {
-            position: relative;
-            top: 1px;
-        }
-        .ButtonG {
-            background-color: #49ece4;
-            border: 3px solid #1f8b99;
-            text-shadow: 0px 2px 2px #1e3b47;
-        }
-        .ButtonG:hover {
-            background-color: #16b6f5;
-        }
-        .ButtonB {
-            background-color: #4974ec;
-            border: 3px solid #1f3599;
-            text-shadow: 0px 2px 2px #1e2447;
-        }
-        .ButtonB:hover {
-            background-color: #165df5;
-        }
-    </style>
-</head>
-<body>
-    <h1>ESP32 Web Server</h1>
-    <p>Sensor DHT22</p>
-    <table>
-        <tbody>
-            <tr>
-                <td>
-                    <p class="center">
-                        <a href="/update"><button class="ButtonR Button">
-                                <i class="fa fa-thermometer-quarter fa-2x" aria-hidden="true"></i> Temp.
-                            </button></a>
-                    </p>
-                </td>
-                <td>
-                    <strong> """+ temperature_value +""" C</strong>
-                    <meter id="fuel" min="0" max="100" low="10" high="25" optimum="24" value=" @@""" + temperature_value +""" @@">
-                        at 50/100
-                    </meter>
-                </td>
-            </tr>
-            <tr>
-                <td>
-                    <p><a href="/update"><button class="ButtonG Button">
-                                <i class="fa fa-tint fa-2x" aria-hidden="true"></i> Hum.
-                            </button></a></p>
-                </td>
-                <td>
-                    <strong> """+ humidity_value +""" %</strong>
-                    <meter id="fuel" min="0" max="100" low="30" high="60" optimum="50" value=" @@""" + humidity_value +""" @@">
-                        at 50/100
-                    </meter>
-                </td>
-            </tr>
-        </tbody>
-    </table>
-</body>
-<script>
-    setInterval(updateValues, 2000);
-    function updateValues() {
-        location.reload(); 
-    }
-</script>
-</html>    
-        """
-    return html
-
-
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.bind(('', 80))
-s.listen(5)
-
-while True:
-    time.sleep_ms(500)
+# Intenta cargar las credenciales de Wi-Fi guardadas
+def load_credentials():
     try:
-        conn, addr = s.accept()
-        print('Got a connection from %s' % str(addr))
-        request = conn.recv(1024)
-        request = str(request)   
-        update = request.find('/update')        
-        
-        if update == 6:
-            print('update') 
+        with open('wifi.txt', 'r') as f:
+            ssid = f.readline().strip()
+            password = f.readline().strip()
+            return ssid, password
+    except OSError:
+        return None, None
+
+def do_connect():
+    """Intenta conectar a una red Wi-Fi."""
+    global led, temperature, humidity
+
+    ssid, password = load_credentials()
+    if not ssid or not password:
+        print("No se encontraron credenciales. Iniciando modo AP.")
+        return False
+
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+
+    if not wlan.isconnected():
+        print(f'Conectando a la red: {ssid}')
+        wlan.connect(ssid, password)
+
+        max_wait = 20
+        while max_wait > 0 and not wlan.isconnected():
+            led.value(not led.value()) # Parpadea el LED
+            sleep(0.5)
+            max_wait -= 1
+
+    if wlan.isconnected():
+        print('Conexión exitosa!')
+        print('Configuración de red:', wlan.ifconfig())
+        led.value(1)  # Enciende el LED de forma continua
+        return True
+    else:
+        print("No se pudo conectar. Iniciando el punto de acceso para reconfiguración.")
+        led.value(0)
+        return False
+
+def do_ap_mode():
+    """Configura el ESP32 como punto de acceso y hostea el portal cautivo."""
+    ap = network.WLAN(network.AP_IF)
+    ap.active(True)
+    ap.config(essid='ESP32-CONFIG', password='micropython')
+    print('Punto de acceso activado. Conectate a "ESP32-CONFIG"')
+    print('Dirección IP del AP:', ap.ifconfig()[0])
+    
+    web_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    web_server.bind(('', 80))
+    web_server.listen(5)
+
+    html = """
+    <html>
+        <head>
+            <title>Configuracion de WiFi</title>
+            <style>
+                body { font-family: sans-serif; text-align: center; background: #f0f2f5; }
+                .container { max-width: 400px; margin: 50px auto; padding: 20px; background: white; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+                h2 { color: #333; }
+                input { width: 90%; padding: 10px; margin: 5px 0; border: 1px solid #ccc; border-radius: 5px; }
+                button { padding: 10px 20px; font-size: 16px; color: white; background: #007bff; border: none; border-radius: 5px; cursor: pointer; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h2>Configuracion de WiFi</h2>
+                <form action="/config">
+                    <input type="text" name="ssid" placeholder="Nombre de la red (SSID)"><br>
+                    <input type="password" name="password" placeholder="Contraseña"><br>
+                    <button type="submit">Conectar</button>
+                </form>
+            </div>
+        </body>
+    </html>
+    """
+    
+    while True:
+        try:
+            conn, addr = web_server.accept()
+            request = conn.recv(1024)
+            request = str(request)
             
-        response = web_page()
-        response = response.replace(" @@","")
-        conn.send('HTTP/1.1 200 OK\n')
-        conn.send('Content-Type: text/html\n')
-        conn.send('Connection: close\n\n')
-        conn.sendall(response)
-        conn.close()
-    except Exception as e:
-        print(e)
+            if "GET /config" in request:
+                conn.send('HTTP/1.1 200 OK\nContent-Type: text/html\n\n')
+                conn.send('<h1>Credenciales guardadas! Reiniciando...</h1><p>Por favor, espere.</p>')
+                
+                ssid_start = request.find("ssid=") + 5
+                ssid_end = request.find("&", ssid_start)
+                new_ssid = request[ssid_start:ssid_end].replace('%20', ' ').replace('+', ' ')
+                
+                password_start = request.find("password=") + 9
+                password_end = request.find(" ", password_start)
+                new_password = request[password_start:password_end].replace('%20', ' ').replace('+', ' ')
+
+                with open('wifi.txt', 'w') as f:
+                    f.write(new_ssid + '\n')
+                    f.write(new_password + '\n')
+                
+                print("Credenciales guardadas. Reiniciando...")
+                sleep(2)
+                machine.reset()
+            else:
+                conn.send('HTTP/1.1 200 OK\nContent-Type: text/html\n\n')
+                conn.send(html)
+
+            conn.close()
+        except OSError:
+            pass
+
+def read_dht():
+    """Lee la temperatura y humedad del sensor DHT22."""
+    global temperature, humidity
+    try:
+        dht_sensor.measure()
+        temperature = dht_sensor.temperature()
+        humidity = dht_sensor.humidity()
+        print(f"Temperatura: {temperature} C, Humedad: {humidity} %")
+    except OSError as e:
+        print(f"Error al leer el sensor DHT: {e}")
+        temperature = -1.0
+        humidity = -1.0
+
+def start_api_server():
+    """Inicia el servidor web para la API RESTful."""
+    global temperature, humidity, reading_frequency
+
+    addr = socket.getaddrinfo('0.0.0.0', 80)[0][-1]
+    api_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    api_server.bind(addr)
+    api_server.listen(5)
+    print("Servidor API RESTful iniciado.")
+
+    while True:
+        current_time = ticks_ms()
+        if ticks_ms() - last_reading_time >= reading_frequency:
+            read_dht()
+            last_reading_time = ticks_ms()
+            
+        try:
+            conn, addr = api_server.accept()
+            request = conn.recv(1024)
+            request_str = request.decode('utf-8')
+
+            # Maneja la ruta /data
+            if "GET /data" in request_str:
+                response_data = {"temperature": temperature, "humidity": humidity}
+                response_json = ujson.dumps(response_data)
+                conn.send('HTTP/1.1 200 OK\nContent-Type: application/json\n\n')
+                conn.send(response_json)
+            
+            # Maneja la ruta /set_freq
+            elif "GET /set_freq?" in request_str:
+                query_params = request_str.split("?")[1]
+                params = dict(param.split("=") for param in query_params.split("&"))
+                if "freq" in params:
+                    try:
+                        new_freq = int(params["freq"])
+                        reading_frequency = max(new_freq, 1000) # Frecuencia minima de 1 segundo
+                        conn.send('HTTP/1.1 200 OK\nContent-Type: text/plain\n\n')
+                        conn.send(f"Frecuencia de lectura actualizada a {reading_frequency} ms.")
+                    except ValueError:
+                        conn.send('HTTP/1.1 400 Bad Request\nContent-Type: text/plain\n\n')
+                        conn.send("Error: 'freq' debe ser un numero entero.")
+                else:
+                    conn.send('HTTP/1.1 400 Bad Request\nContent-Type: text/plain\n\n')
+                    conn.send("Error: Parametro 'freq' no encontrado.")
+            
+            # Maneja la ruta raiz y otras
+            else:
+                conn.send('HTTP/1.1 200 OK\nContent-Type: text/plain\n\n')
+                conn.send("API RESTful ESP32 para Estacion Meteorologica")
+
+            conn.close()
+        except OSError:
+            pass
+
+# Lógica principal del programa
+if __name__ == "__main__":
+    if not do_connect():
+        do_ap_mode()
+    else:
+        start_api_server()
