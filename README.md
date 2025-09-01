@@ -19,6 +19,11 @@ Encendido fijo: Conexión exitosa.
 
 Manejo de Errores: En caso de fallos de conexión, vuelve automáticamente al modo de portal cautivo.
 
+Ciclo de vida 
+Objetos singleton para los recursos que deben existir de forma permanente (los pines, el sensor, el servidor).
+
+Objetos transient para los recursos que solo se necesitan brevemente (las conexiones de red).
+
 Conceptos Técnicos Clave
 API RESTful
 La API RESTful define un conjunto de reglas que permite a los programas de software comunicarse entre sí a través de Internet. En este proyecto, tu ESP32 actúa como un servidor y cualquier dispositivo que pida datos (por ejemplo, tu teléfono o computadora) actúa como un cliente. La petición se hace a una dirección específica (/api/datos), y la respuesta es un paquete de datos en formato JSON que contiene la temperatura y la humedad.
