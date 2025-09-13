@@ -1,5 +1,3 @@
-# main.py
-
 import network
 import socket
 from time import sleep, ticks_ms
@@ -14,8 +12,8 @@ DHT_PIN = 13
 led = machine.Pin(LED_PIN, machine.Pin.OUT)
 dht_sensor = DHT22(machine.Pin(DHT_PIN))
 
-# Frecuencia de lectura y envío en milisegundos (5 minutos)
-reading_frequency = 300000
+# Frecuencia de lectura y envío en milisegundos
+reading_frequency = 1000 # Envío cada 1000 milisegundos (1 segundo)
 last_reading_time = 0
 humidity = -1.0
 temperature = -1.0
@@ -130,20 +128,24 @@ if __name__ == "__main__":
     if not wlan.isconnected():
         do_ap_mode()
     else:
+        # CORRECCIÓN: Se inicializa el servidor web solo una vez y se hace no bloqueante.
+        addr = socket.getaddrinfo('0.0.0.0', 80)[0][-1]
+        api_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        api_server.bind(addr)
+        api_server.listen(1)
+        api_server.setblocking(False)
+
         while True:
+            # Lógica para leer el sensor y enviar datos a Supabase
             current_time = ticks_ms()
-            if ticks_ms() - last_reading_time >= reading_frequency:
+            if current_time - last_reading_time >= reading_frequency:
                 read_dht()
                 if temperature != -1.0 and humidity != -1.0:
                     send_to_supabase(temperature, humidity)
-                last_reading_time = ticks_ms()
+                last_reading_time = current_time
 
-            # Lógica para manejar el servidor web local (opcional)
+            #Lógica para el servidor web (no bloqueante)
             try:
-                addr = socket.getaddrinfo('0.0.0.0', 80)[0][-1]
-                api_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                api_server.bind(addr)
-                api_server.listen(1)
                 conn, addr = api_server.accept()
                 req = conn.recv(1024)
                 req_str = req.decode('utf-8')
@@ -154,6 +156,9 @@ if __name__ == "__main__":
                     conn.send(b'HTTP/1.1 200 OK\nContent-Type: application/json\n\n')
                     conn.send(response_json)
                 conn.close()
-            except (OSError, IndexError):
+            except OSError:
+                # Esto es normal cuando no hay conexiones entrantes, se ignora
                 pass
-            sleep(1) # Pequeña pausa para no sobrecargar el loop
+            
+            
+            sleep(0.1)
