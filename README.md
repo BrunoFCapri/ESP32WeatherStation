@@ -4,16 +4,16 @@ Una estación meteorológica inteligente basada en ESP32 que lee datos de temper
 
 ## 📋 Tabla de Contenidos
 
-- [Características](#características)
-- [Componentes de Hardware](#componentes-de-hardware)
-- [Esquema de Conexión](#esquema-de-conexión)
-- [Instalación](#instalación)
-- [Configuración](#configuración)
-- [API Endpoints](#api-endpoints)
-- [Estructura del Proyecto](#estructura-del-proyecto)
-- [Base de Datos Supabase](#base-de-datos-supabase)
-- [Uso](#uso)
-- [Troubleshooting](#troubleshooting)
+- [🚀 Características](#-características)
+- [🔧 Componentes de Hardware](#-componentes-de-hardware)
+- [🔌 Esquema de Conexión](#-esquema-de-conexión)
+- [📦 Instalación](#-instalación)
+- [⚙️ Configuración](#️-configuración)
+- [🌐 API Endpoints](#-api-endpoints)
+- [📁 Estructura del Proyecto](#-estructura-del-proyecto)
+- [🗄️ Base de Datos Supabase](#️-base-de-datos-supabase)
+- [🎯 Uso](#-uso)
+- [🔍 Troubleshooting](#-troubleshooting)
 
 ## 🚀 Características
 
@@ -550,4 +550,5 @@ Para soporte y preguntas:
 **Autor**: Bruno Fabián Capri
 
 **Estado**: Producción
+
 
