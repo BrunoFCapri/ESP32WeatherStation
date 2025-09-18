@@ -1,6 +1,6 @@
 # Estación Meteorológica ESP32 con Integración Supabase
 
-Una estación meteorológica inteligente basada en ESP32 que lee datos de temperatura y humedad mediante un sensor DHT22 y los almacena en una base de datos Supabase. El proyecto incluye configuración WiFi automática, servidor web RESTful y portal cautivo para configuración inicial.
+Una estación meteorológica inteligente basada en ESP32 que lee datos de temperatura y humedad mediante un sensor DHT22 y los almacena en una base de datos Supabase. El proyecto incluye configuración WiFi automática, servidor web RESTful y portal cautivo para configuración inicial. Aclaracion tiene una pagina web operando con supabase https://clima-zero-3xlfopf5y-brunofcapris-projects.vercel.app (repo https://github.com/BrunoFCapri/ClimaZero) 
 
 ## 📋 Tabla de Contenidos
 
@@ -531,9 +531,9 @@ Las contribuciones son bienvenidas. Por favor:
 ## 📞 Soporte
 
 Para soporte y preguntas:
-- Abrir un Issue en GitHub
-- Email: tu-email@ejemplo.com
-- Documentación: Ver carpeta `docs/`
+
+- Email: bruno.fabian.capri.oficial@gmail.com
+- Número: 343 4178190 
 
 ## 📚 Referencias
 
@@ -546,5 +546,6 @@ Para soporte y preguntas:
 
 **Versión**: 1.0  
 **Fecha**: Septiembre 2025  
-**Autor**: Bruno  
+**Autor**: Bruno Fabián Capri
+
 **Estado**: Producción
