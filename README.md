@@ -533,7 +533,8 @@ Las contribuciones son bienvenidas. Por favor:
 Para soporte y preguntas:
 
 - Email: bruno.fabian.capri.oficial@gmail.com
-- Número: 343 4178190 
+- Número: 343 4178190
+- Discord: bruno.f.c
 
 ## 📚 Referencias
 
@@ -549,3 +550,4 @@ Para soporte y preguntas:
 **Autor**: Bruno Fabián Capri
 
 **Estado**: Producción
+
