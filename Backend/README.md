@@ -87,7 +87,18 @@ La arquitectura debe:
   Devuelve los datos consolidados de un día específico desde Supabase.
 
 * **GET `/api/data/historical?from=YYYY-MM-DD&to=YYYY-MM-DD`**
-  Devuelve datos crudos desde la DB de series temporales (para gráficas detalladas).
+  Devuelve datos desde la DB de series temporales (para gráficas detalladas). Soporta agregación por granularidad:
+
+  - Parámetro opcional `granularity`:
+    - Valores: `raw` (por defecto), `1m`, `5m`, `15m`, `1h`, `1d`.
+    - Comportamiento:
+      - `raw`: devuelve lecturas crudas.
+      - `1m|5m|15m|1h|1d`: agrega por bucket de tiempo devolviendo promedios de `temperatura` y `humedad` por marca de tiempo del bucket.
+
+  - Ejemplos:
+    - `/api/data/historical?from=2025-09-01&to=2025-09-07` → datos crudos.
+    - `/api/data/historical?from=2025-09-01&to=2025-09-07&granularity=5m` → promedios cada 5 minutos.
+    - `/api/data/historical?from=2025-09-01&to=2025-09-07&granularity=1h` → promedios por hora.
 
 ---
 
