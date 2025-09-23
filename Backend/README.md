@@ -102,6 +102,82 @@ La arquitectura debe:
 
 ---
 
+## 🔌 Integración con InfluxDB (S4R)
+
+El backend histórico está integrado con **InfluxDB** (proveedor S4R) vía la API de consultas **Flux**. La Edge Function intenta usar Influx cuando encuentra las siguientes variables de entorno, y si faltan o hay un error, cae en un mock local de datos.
+
+- `INFLUX_URL`: URL base de InfluxDB (ej: `https://influx.example.com`)
+- `INFLUX_ORG`: Organización de InfluxDB
+- `INFLUX_BUCKET`: Bucket de datos (ej: `weather`)
+- `INFLUX_TOKEN`: Token con permisos de lectura sobre el bucket
+
+### Consulta y agregación
+
+- Measurement esperado: `readings`
+- Fields: `temperatura`, `humedad`
+- Rango: `from`, `to` en formato compatible con RFC3339 (la función los convierte a ISO UTC)
+- Agregación: cuando `granularity != raw`, se aplica `aggregateWindow(every: <granularity>, fn: mean)` y se pivotean columnas para entregar objetos:
+
+```json
+{ "ts": "<ISO-UTC>", "temperatura": <number>, "humedad": <number> }
+```
+
+Si `granularity=raw`, se devuelve el stream crudo (sin `aggregateWindow`).
+
+### Notas
+
+- La función usa `pivot` y `keep` en Flux para devolver filas con ambas métricas en la misma marca de tiempo.
+- Los buckets se computan en UTC.
+- Si se requiere `min`, `max` o `count`, se puede extender el query Flux o hacer múltiples queries por field.
+
+---
+
+## 🔐 Secrets y Variables de Entorno
+
+Configura estos secrets en tu proyecto de Supabase para las Edge Functions:
+
+- Supabase
+  - `SUPABASE_URL`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+- InfluxDB (S4R)
+  - `INFLUX_URL`
+  - `INFLUX_ORG`
+  - `INFLUX_BUCKET`
+  - `INFLUX_TOKEN`
+
+### Cómo configurarlos (Supabase CLI, PowerShell)
+
+Ejecuta estos comandos en la raíz del proyecto (donde está tu `supabase/config.toml`):
+
+```powershell
+supabase secrets set SUPABASE_URL="https://<tu-proyecto>.supabase.co"
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY="<service_role_key>"
+
+supabase secrets set INFLUX_URL="https://<host-influx>"
+supabase secrets set INFLUX_ORG="<org>"
+supabase secrets set INFLUX_BUCKET="weather"
+supabase secrets set INFLUX_TOKEN="<token>"
+```
+
+Alternativa con archivo `.env`:
+
+```env
+SUPABASE_URL=https://<tu-proyecto>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<service_role_key>
+INFLUX_URL=https://<host-influx>
+INFLUX_ORG=<org>
+INFLUX_BUCKET=weather
+INFLUX_TOKEN=<token>
+```
+
+Y luego:
+
+```powershell
+supabase secrets set --env-file ./.env
+```
+
+---
+
 ## ✅ Ventajas de esta Arquitectura
 
 * **Rápida**: consultas comunes (día actual o históricos diarios) van directo a Supabase.
