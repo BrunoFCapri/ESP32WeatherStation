@@ -52,7 +52,7 @@ La arquitectura debe:
 
 **Tabla: `resumen_dia`**
 
-| fecha (DATE) | promedio\_temperatura (FLOAT) | minimo\_temperatura (FLOAT) | promedio\_humedad (FLOAT) |
+| fecha (DATE) | promedio_temperatura (FLOAT) | minimo_temperatura (FLOAT) | promedio_humedad (FLOAT) |
 | ------------ | ----------------------------- | --------------------------- | ------------------------- |
 
 * Solo un registro por fecha.
@@ -63,8 +63,8 @@ La arquitectura debe:
 
 ### En **DB Serie Temporal (via S3)**
 
-**Tabla: `readings`**
-\| timestamp (TIMESTAMPTZ) | temperatura (FLOAT) | humedad (FLOAT) |
+**Tabla: `readings`**  
+| timestamp (TIMESTAMPTZ) | temperatura (FLOAT) | humedad (FLOAT) |
 
 * Guarda cada lectura sin procesar.
 * Escalable para históricos grandes.
@@ -76,35 +76,65 @@ La arquitectura debe:
 
 ### Endpoints propuestos
 
-* **POST `[/api/ingest](https://wywcuhdexiiitliibpnu.supabase.co/functions/v1/ingest)`**
+* **POST `functions/v1/ingest`**  
   Recibe datos de la placa.
 
   * Valida payload.
   * Actualiza `resumen_dia` en Supabase.
   * Inserta registro en `readings` (serie temporal).
 
-* **GET `/api/data/daily?fecha=YYYY-MM-DD`**
+* **GET `functions/v1/daily?fecha=YYYY-MM-DD`**  
   Devuelve los datos consolidados de un día específico desde Supabase.
 
-* **GET `/api/data/historical?from=YYYY-MM-DD&to=YYYY-MM-DD`**
-  Devuelve datos desde la DB de series temporales (para gráficas detalladas). Soporta agregación por granularidad:
+
+* **GET `functions/v1/historic?from=YYYY-MM-DD&to=YYYY-MM-DD`**  
+  (Nombre actualizado: antes `historical`). Devuelve datos desde la DB de series temporales (para gráficas detalladas).  
+  Soporta agregación por granularidad y estadísticas:
 
   - Parámetro opcional `granularity`:
     - Valores: `raw` (por defecto), `1m`, `5m`, `15m`, `1h`, `1d`.
     - Comportamiento:
-      - `raw`: devuelve lecturas crudas.
-      - `1m|5m|15m|1h|1d`: agrega por bucket de tiempo devolviendo promedios de `temperatura` y `humedad` por marca de tiempo del bucket.
+      - `raw`: devuelve lecturas crudas (ignora `stats`).
+      - `1m|5m|15m|1h|1d`: agrega por bucket de tiempo devolviendo estadísticas de `temperatura` y `humedad`.
+
+  - Parámetro opcional `stats` (solo aplica si `granularity != raw`):
+    - Valores separados por coma: `mean`, `min`, `max`.
+    - Por defecto: `mean`.
+    - Si se solicita una sola estadística (ej: `mean`), la respuesta no incluye campo `stat`.
+    - Si se solicitan varias (ej: `mean,min,max`), se devuelve una fila por estadística y timestamp con campo `stat`.
 
   - Ejemplos:
-    - `/api/data/historical?from=2025-09-01&to=2025-09-07` → datos crudos.
-    - `/api/data/historical?from=2025-09-01&to=2025-09-07&granularity=5m` → promedios cada 5 minutos.
-    - `/api/data/historical?from=2025-09-01&to=2025-09-07&granularity=1h` → promedios por hora.
+    - `/api/data/historic?from=2025-09-01&to=2025-09-07` → datos crudos.
+    - `/api/data/historic?from=2025-09-01&to=2025-09-07&granularity=5m` → promedios cada 5 minutos.
+    - `/api/data/historic?from=2025-09-01&to=2025-09-07&granularity=1h` → promedios por hora.
+    - `/api/data/historic?from=2025-09-01&to=2025-09-02&granularity=15m&stats=mean,min,max` → mean/min/max cada 15m.
+    - `/api/data/historic?from=2025-09-01&to=2025-09-08&granularity=1d&stats=min,max` → min y max diarios.
+
+  - Formatos de respuesta (ejemplos):
+    - Agregado con una estadística:
+      ```json
+      [
+        { "ts": "2025-09-01T00:00:00Z", "temperatura": 22.3, "humedad": 49.8 }
+      ]
+      ```
+    - Agregado con varias estadísticas:
+      ```json
+      [
+        { "ts": "2025-09-01T00:00:00Z", "stat": "mean", "temperatura": 22.3, "humedad": 49.8 },
+        { "ts": "2025-09-01T00:00:00Z", "stat": "min",  "temperatura": 21.9, "humedad": 48.7 },
+        { "ts": "2025-09-01T00:00:00Z", "stat": "max",  "temperatura": 22.9, "humedad": 50.4 }
+      ]
+      ```
+
+  - Notas:
+    - Usar fechas completas en formato ISO UTC (`YYYY-MM-DDTHH:MM:SSZ`) para mayor precisión y evitar desfases de zona horaria.
+    - Si se requiere extender a otras estadísticas (ej. `count`, `spread`), se puede modificar el query Flux duplicando el patrón actual.
 
 ---
 
 ## 🔌 Integración con InfluxDB (S4R)
 
-El backend histórico está integrado con **InfluxDB** (proveedor S4R) vía la API de consultas **Flux**. La Edge Function intenta usar Influx cuando encuentra las siguientes variables de entorno, y si faltan o hay un error, cae en un mock local de datos.
+El backend histórico está integrado con **InfluxDB** (proveedor S4R) vía la API de consultas **Flux**. La Edge Function intenta usar Influx cuando encuentra las siguientes variables de entorno, y s[...]
 
 - `INFLUX_URL`: URL base de InfluxDB (ej: `https://influx.example.com`)
 - `INFLUX_ORG`: Organización de InfluxDB
@@ -116,19 +146,27 @@ El backend histórico está integrado con **InfluxDB** (proveedor S4R) vía la A
 - Measurement esperado: `readings`
 - Fields: `temperatura`, `humedad`
 - Rango: `from`, `to` en formato compatible con RFC3339 (la función los convierte a ISO UTC)
-- Agregación: cuando `granularity != raw`, se aplica `aggregateWindow(every: <granularity>, fn: mean)` y se pivotean columnas para entregar objetos:
+- Agregación:
+  - Cuando `granularity != raw`, se aplica `aggregateWindow(every: <granularity>, fn: <mean|min|max>)` para cada estadística solicitada y luego se combinan resultados.
+  - Se pivotean columnas para entregar objetos:
 
 ```json
 { "ts": "<ISO-UTC>", "temperatura": <number>, "humedad": <number> }
 ```
 
-Si `granularity=raw`, se devuelve el stream crudo (sin `aggregateWindow`).
+O, si múltiples estadísticas:
+
+```json
+{ "ts": "<ISO-UTC>", "stat": "mean|min|max", "temperatura": <number>, "humedad": <number> }
+```
+
+Si `granularity=raw`, se devuelve el stream crudo (sin `aggregateWindow` ni campo `stat`).
 
 ### Notas
 
 - La función usa `pivot` y `keep` en Flux para devolver filas con ambas métricas en la misma marca de tiempo.
 - Los buckets se computan en UTC.
-- Si se requiere `min`, `max` o `count`, se puede extender el query Flux o hacer múltiples queries por field.
+- Si se requiere `count`, `max`, `min` adicionales o `spread`, se pueden agregar más pipelines.
 
 ---
 
