@@ -1,49 +1,136 @@
-// Nota: Edge Function con soporte de granularidad.
-// Integra InfluxDB (S4R) vía API Flux si hay credenciales; si no, usa mock.
-
-// Declaraciones para evitar errores de tipos en entornos sin Deno typings.
-// Estas APIs existen en tiempo de ejecución dentro de Supabase Edge / Deno.
+// Edge Function para consulta histórica con soporte de granularidad y estadísticas (mean, min, max).
+// No incluye mock: requiere credenciales de InfluxDB válidas. Devuelve error si faltan.
+// Parámetros:
+//   from (ISO8601, obligatorio)
+//   to (ISO8601, obligatorio, > from)
+//   granularity = raw|1m|5m|15m|1h|1d (por defecto raw)
+//   stats = lista separada por comas: mean,min,max (solo aplica si granularity != raw; default mean)
+//
+// Si granularity = raw -> ignora stats, devuelve lecturas crudas pivotadas (temperatura, humedad)
+// Si granularity != raw:
+//   - Si stats = una sola (ej: mean): devuelve [{ ts, temperatura, humedad }]
+//   - Si stats = varias (ej: mean,min,max): devuelve [{ ts, stat, temperatura, humedad }, ...]
+//
+// Declaraciones para evitar errores de tipos en entornos sin Deno typings (Supabase Edge / Deno runtime).
 // deno-lint-ignore no-explicit-any
 declare const Deno: any;
 // deno-lint-ignore no-explicit-any
 declare const serve: any;
 
-// deno-lint-ignore no-explicit-any
 serve(async (req: any) => {
-  const url = new URL(req.url);
-  const from = url.searchParams.get("from");
-  const to = url.searchParams.get("to");
-  const granularity = (url.searchParams.get("granularity") || "raw").toLowerCase();
+  try {
+    if (req.method !== "GET") {
+      return json({ error: "Method not allowed" }, 405);
+    }
 
-  if (!from || !to) return new Response("Missing parameters", { status: 400 });
+    const url = new URL(req.url);
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    const granularity = (url.searchParams.get("granularity") || "raw").toLowerCase();
+    const statsParam = url.searchParams.get("stats") || "mean";
 
-  const g = normalizeGranularity(granularity);
-  if (!g) {
-    return new Response(
-      `Invalid granularity. Use one of: raw, 1m, 5m, 15m, 1h, 1d`,
-      { status: 400 }
-    );
+    if (!from || !to) {
+      return json(
+        {
+          error: "Missing parameters",
+          required: ["from", "to"],
+          example: "/functions/v1/historic?from=2025-09-01T00:00:00Z&to=2025-09-02T00:00:00Z&granularity=1h&stats=mean,min,max",
+        },
+        400
+      );
+    }
+
+    const g = normalizeGranularity(granularity);
+    if (!g) {
+      return json(
+        {
+          error: "Invalid granularity",
+          allowed: ["raw", "1m", "5m", "15m", "1h", "1d"],
+        },
+        400
+      );
+    }
+
+    // Validación de fechas
+    let startDate: Date;
+    let endDate: Date;
+    try {
+      startDate = new Date(from);
+      endDate = new Date(to);
+      if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+        throw new Error("Invalid date format");
+      }
+      if (startDate >= endDate) {
+        return json(
+          {
+            error: "Invalid range",
+            detail: "`from` must be strictly earlier than `to`",
+          },
+          400
+        );
+      }
+    } catch (e) {
+      return json({ error: "Invalid date(s)", detail: String(e) }, 400);
+    }
+
+    // Parseo y validación de stats (solo si NO es raw)
+    let stats: string[] = [];
+    if (g.unit === "raw") {
+      stats = []; // no se usa
+    } else {
+      stats = statsParam
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s.length > 0);
+      const allowed = new Set(["mean", "min", "max"]);
+      if (stats.length === 0) {
+        stats = ["mean"];
+      }
+      for (const st of stats) {
+        if (!allowed.has(st)) {
+          return json(
+            {
+              error: "Invalid stats parameter",
+              invalid: st,
+              allowed: ["mean", "min", "max"],
+            },
+            400
+          );
+        }
+      }
+      // Eliminar duplicados
+      stats = Array.from(new Set(stats));
+    }
+
+    const samples = await fetchHistoricalData(from, to, g, stats);
+
+    return json(samples, 200);
+  } catch (e) {
+    console.error("Unhandled error:", e);
+    return json({ error: "Internal Server Error", detail: String(e) }, 500);
   }
-
-  const raw = await fetchHistoricalData(from, to, g);
-  const result = g.unit === "raw" || (Array.isArray(raw) && isAggregated(raw, g))
-    ? raw
-    : aggregateByGranularity(raw as Sample[], g);
-  return new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
 });
 
 type Sample = { ts: string; temperatura: number; humedad: number };
+type StatSample = Sample & { stat?: string };
 
-// Env de InfluxDB (S4R)
-const INFLUX_URL = Deno.env.get("INFLUX_URL"); // ej: https://influx.example.com
+// Variables de entorno para InfluxDB
+const INFLUX_URL = Deno.env.get("INFLUX_URL");
 const INFLUX_ORG = Deno.env.get("INFLUX_ORG");
 const INFLUX_BUCKET = Deno.env.get("INFLUX_BUCKET");
 const INFLUX_TOKEN = Deno.env.get("INFLUX_TOKEN");
 
-function normalizeGranularity(input: string):
-  | { unit: "raw" }
-  | { unit: "minute" | "hour" | "day"; size: number } | null {
-  if (input === "raw") return { unit: "raw" } as const;
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8" },
+  });
+}
+
+function normalizeGranularity(
+  input: string
+): { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number } | null {
+  if (input === "raw") return { unit: "raw" };
   const map: Record<string, { unit: "minute" | "hour" | "day"; size: number }> = {
     "1m": { unit: "minute", size: 1 },
     "5m": { unit: "minute", size: 5 },
@@ -54,104 +141,96 @@ function normalizeGranularity(input: string):
   return map[input] ?? null;
 }
 
-function floorDateToBucket(d: Date, unit: "minute" | "hour" | "day", size: number): Date {
-  const t = new Date(d); // copy
-  t.setUTCSeconds(0, 0);
-  if (unit === "minute") {
-    const m = t.getUTCMinutes();
-    t.setUTCMinutes(m - (m % size));
-  } else if (unit === "hour") {
-    t.setUTCMinutes(0);
-    const h = t.getUTCHours();
-    t.setUTCHours(h - (h % size));
-  } else if (unit === "day") {
-    t.setUTCHours(0, 0, 0, 0);
-  }
-  return t;
-}
-
-function isoUTC(d: Date): string {
-  return new Date(d).toISOString();
-}
-
-function aggregateByGranularity(data: Sample[], g: { unit: "minute" | "hour" | "day"; size: number }): Sample[] {
-  const buckets = new Map<string, { sumT: number; sumH: number; n: number }>();
-  for (const s of data) {
-    const dt = new Date(s.ts);
-    const bucket = floorDateToBucket(dt, g.unit, g.size);
-    const key = isoUTC(bucket);
-    const acc = buckets.get(key) || { sumT: 0, sumH: 0, n: 0 };
-    acc.sumT += s.temperatura;
-    acc.sumH += s.humedad;
-    acc.n += 1;
-    buckets.set(key, acc);
-  }
-  const out: Sample[] = [];
-  for (const [key, acc] of buckets) {
-    out.push({ ts: key, temperatura: acc.sumT / acc.n, humedad: acc.sumH / acc.n });
-  }
-  // Ordenar por ts ascendente
-  out.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
-  return out;
-}
-
-// Orquestador: intenta Influx; si no hay config, usa mock
-async function fetchHistoricalData(from: string, to: string, g: { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number }): Promise<Sample[]> {
-  const hasInflux = !!(INFLUX_URL && INFLUX_ORG && INFLUX_BUCKET && INFLUX_TOKEN);
-  if (hasInflux) {
-    try {
-      const influx = await fetchFromInflux(from, to, g);
-      return influx;
-    } catch (e) {
-      console.error("Influx query failed, falling back to mock:", e);
-      return fetchMockData(from, to);
-    }
-  }
-  return fetchMockData(from, to);
-}
-
-function isAggregated(_data: Sample[] | unknown, g: { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number }): boolean {
-  // Si viene de Influx con aggregateWindow ya aplicado, no re-agregamos.
-  // Este mock asume que Influx ya aplica la agregación cuando g != raw.
-  return g.unit !== "raw";
-}
-
 function toRFC3339Z(s: string): string {
   const d = new Date(s);
   if (isNaN(d.getTime())) throw new Error("Invalid date: " + s);
   return d.toISOString();
 }
 
-function granularityToFluxEvery(g: { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number }): string | null {
-  if ((g as any).unit === "raw") return null;
-  const gg = g as { unit: "minute" | "hour" | "day"; size: number };
-  if (gg.unit === "minute") return `${gg.size}m`;
-  if (gg.unit === "hour") return `${gg.size}h`;
-  if (gg.unit === "day") return `${gg.size}d`;
+function granularityToFluxEvery(
+  g: { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number }
+): string | null {
+  if (g.unit === "raw") return null;
+  if (g.unit === "minute") return `${g.size}m`;
+  if (g.unit === "hour") return `${g.size}h`;
+  if (g.unit === "day") return `${g.size}d`;
   return null;
 }
 
-async function fetchFromInflux(from: string, to: string, g: { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number }): Promise<Sample[]> {
+async function fetchHistoricalData(
+  from: string,
+  to: string,
+  g: { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number },
+  stats: string[]
+): Promise<StatSample[]> {
+  const missingEnv: string[] = [];
+  if (!INFLUX_URL) missingEnv.push("INFLUX_URL");
+  if (!INFLUX_ORG) missingEnv.push("INFLUX_ORG");
+  if (!INFLUX_BUCKET) missingEnv.push("INFLUX_BUCKET");
+  if (!INFLUX_TOKEN) missingEnv.push("INFLUX_TOKEN");
+
+  if (missingEnv.length > 0) {
+    throw new Error(
+      "Missing InfluxDB environment variables: " + missingEnv.join(", ")
+    );
+  }
+
+  return await fetchFromInflux(from, to, g, stats);
+}
+
+async function fetchFromInflux(
+  from: string,
+  to: string,
+  g: { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number },
+  stats: string[]
+): Promise<StatSample[]> {
   const start = toRFC3339Z(from);
   const stop = toRFC3339Z(to);
   const every = granularityToFluxEvery(g);
 
-  // Construimos una consulta Flux que devuelve columnas pivotadas: _time, temperatura, humedad
-  // Measurement: "readings" con fields: temperatura, humedad
-  const aggregate = every
-    ? `|> aggregateWindow(every: ${every}, fn: mean, createEmpty: false)`
-    : "";
+  let flux: string;
 
-  const flux = `from(bucket: "${INFLUX_BUCKET}")
+  if (g.unit === "raw") {
+    // Versión cruda (sin aggregateWindow)
+    flux = `from(bucket: "${INFLUX_BUCKET}")
   |> range(start: time(v: "${start}"), stop: time(v: "${stop}"))
   |> filter(fn: (r) => r._measurement == "readings")
   |> filter(fn: (r) => r._field == "temperatura" or r._field == "humedad")
-  ${aggregate}
-  |> keep(columns: ["_time","_field","_value"]) 
+  |> keep(columns: ["_time","_field","_value"])
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"])`;
+  } else {
+    // Construimos pipelines por cada estadística solicitada
+    // Cada uno se marca con _stat para pivot posterior.
+    // Luego unimos con union().
+    const pipelines = stats.map((st) => {
+      const fnMap: Record<string, string> = {
+        mean: "mean",
+        min: "min",
+        max: "max",
+      };
+      const fn = fnMap[st];
+      return `
+  data
+    |> aggregateWindow(every: ${every}, fn: ${fn}, createEmpty: false)
+    |> set(key: "_stat", value: "${st}")
+    |> keep(columns: ["_time","_field","_value","_stat"])`;
+    });
 
-  const url = `${INFLUX_URL!.replace(/\/$/, "")}/api/v2/query?org=${encodeURIComponent(INFLUX_ORG!)}`;
+    flux = `data = from(bucket: "${INFLUX_BUCKET}")
+  |> range(start: time(v: "${start}"), stop: time(v: "${stop}"))
+  |> filter(fn: (r) => r._measurement == "readings")
+  |> filter(fn: (r) => r._field == "temperatura" or r._field == "humedad")
+  
+union(tables: [${pipelines.join(",")}])
+  |> pivot(rowKey: ["_time","_stat"], columnKey: ["_field"], valueColumn: "_value")
+  |> sort(columns: ["_time","_stat"])`;
+  }
+
+  const url = `${INFLUX_URL!.replace(/\/$/, "")}/api/v2/query?org=${encodeURIComponent(
+    INFLUX_ORG!
+  )}`;
+
   const resp = await fetch(url, {
     method: "POST",
     headers: {
@@ -161,24 +240,30 @@ async function fetchFromInflux(from: string, to: string, g: { unit: "raw" } | { 
     },
     body: flux,
   });
+
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`Influx error ${resp.status}: ${text}`);
   }
+
   const csv = await resp.text();
-  return parseInfluxCSV(csv);
+  return parseInfluxCSV(csv, g.unit !== "raw" && stats.length > 1);
 }
 
-function parseInfluxCSV(csv: string): Sample[] {
-  const lines = csv.split(/\r?\n/).filter((l) => l.trim().length > 0 && !l.startsWith("#"));
+function parseInfluxCSV(csv: string, hasStat: boolean): StatSample[] {
+  const lines = csv
+    .split(/\r?\n/)
+    .filter((l) => l.trim().length > 0 && !l.startsWith("#"));
   if (lines.length === 0) return [];
   const header = lines[0].split(",");
   const idxTime = header.indexOf("_time");
   const idxTemp = header.indexOf("temperatura");
   const idxHum = header.indexOf("humedad");
+  const idxStat = header.indexOf("_stat");
+
   if (idxTime === -1) return [];
 
-  const out: Sample[] = [];
+  const out: StatSample[] = [];
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(",");
     if (cols.length < header.length) continue;
@@ -188,28 +273,18 @@ function parseInfluxCSV(csv: string): Sample[] {
     const temperatura = tStr ? Number(tStr) : NaN;
     const humedad = hStr ? Number(hStr) : NaN;
     if (!isNaN(temperatura) && !isNaN(humedad)) {
-      out.push({ ts, temperatura, humedad });
+      if (hasStat && idxStat >= 0) {
+        out.push({
+          ts,
+            // Remarcamos 'stat' sólo si se pidió más de una estadística
+          stat: cols[idxStat],
+          temperatura,
+          humedad,
+        });
+      } else {
+        out.push({ ts, temperatura, humedad });
+      }
     }
-  }
-  return out;
-}
-
-// Función mock: genera datos crudos cada 5 minutos dentro del rango solicitado
-async function fetchMockData(from: string, to: string): Promise<Sample[]> {
-  const start = new Date(from);
-  const end = new Date(to);
-  if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-    throw new Error("Invalid date range");
-  }
-  const out: Sample[] = [];
-  const stepMs = 5 * 60 * 1000; // 5 minutos
-  for (let t = start.getTime(); t <= end.getTime(); t += stepMs) {
-    // Valores simulados con pequeñas variaciones
-    const baseT = 22;
-    const baseH = 50;
-    const noiseT = Math.sin(t / 3.6e6) * 0.5 + (Math.random() - 0.5) * 0.2;
-    const noiseH = Math.cos(t / 3.6e6) * 1.0 + (Math.random() - 0.5) * 0.5;
-    out.push({ ts: new Date(t).toISOString(), temperatura: baseT + noiseT, humedad: baseH + noiseH });
   }
   return out;
 }
