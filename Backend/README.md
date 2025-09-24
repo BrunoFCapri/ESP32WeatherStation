@@ -35,6 +35,7 @@ La arquitectura debe:
 * Actualiza en Supabase la fila del día con ese promedio definitivo.
 * ✅ **Implementado como**: Edge Function `daily-summary-cron` + pg_cron job automático.
 * ✅ **Documentación completa**: Ver `/supabase/CRON_JOB_README.md`
+* ✅ **Guía de implementación web**: Ver `/implementacion.md` - Implementación completa desde la interfaz de Supabase
 
 ---
 
