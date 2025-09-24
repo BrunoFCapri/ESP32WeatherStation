@@ -30,10 +30,7 @@ async function insertTemporalDB(ts: string, temperatura: number, humedad: number
       console.error("Error writing to InfluxDB:", await res.text());
       throw new Error("InfluxDB insert failed");
     }
-  } else {
-    // MOCK: solo loguea
-    console.log("Mock insert en serie temporal:", { ts, temperatura, humedad });
-  }
+  } 
 }
 
 serve(async (req) => {
