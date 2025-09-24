@@ -28,11 +28,13 @@ La arquitectura debe:
 
 ---
 
-### 2. Procesamiento al final del día
+### 2. Procesamiento al final del día - ✅ IMPLEMENTADO
 
-* Un **cron job** o función programada se ejecuta al cierre del día.
-* Recalcula el **promedio real** de temperatura y humedad del día desde la base de series temporales.
+* Un **cron job** o función programada se ejecuta al cierre del día (23:59 UTC).
+* Recalcula el **promedio real** de temperatura y humedad del día desde la base de series temporales (InfluxDB).
 * Actualiza en Supabase la fila del día con ese promedio definitivo.
+* ✅ **Implementado como**: Edge Function `daily-summary-cron` + pg_cron job automático.
+* ✅ **Documentación completa**: Ver `/supabase/CRON_JOB_README.md`
 
 ---
 
@@ -135,6 +137,24 @@ La arquitectura debe:
   - Notas:
     - Usar fechas completas en formato ISO UTC (`YYYY-MM-DDTHH:MM:SSZ`) para mayor precisión y evitar desfases de zona horaria.
     - Si se requiere extender a otras estadísticas (ej. `count`, `spread`), se puede modificar el query Flux duplicando el patrón actual.
+
+* **POST `functions/v1/daily-summary-cron`** ✅  
+  **[NUEVO]** Función de cron job para actualizar promedios diarios reales desde InfluxDB.
+
+  * ✅ Se ejecuta automáticamente todos los días a las 23:59 UTC via pg_cron.
+  * ✅ Acepta parámetro opcional `date` (YYYY-MM-DD) en el body para procesar días específicos.
+  * ✅ Consulta InfluxDB para obtener promedios reales del día.
+  * ✅ Actualiza la tabla `resumen_dia` con los promedios calculados.
+  * ✅ Manejo de errores completo y logging detallado.
+  * ✅ **Sin mock**: Requiere credenciales de InfluxDB válidas.
+
+  - Ejemplo de uso manual:
+    ```bash
+    curl -X POST https://your-project.supabase.co/functions/v1/daily-summary-cron \
+      -H "Authorization: Bearer SERVICE_ROLE_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"date": "2024-09-23"}'
+    ```
 
 ---
 
