@@ -76,7 +76,7 @@ La arquitectura debe:
 
 ### Endpoints propuestos
 
-* **POST `/api/ingest`**
+* **POST `[/api/ingest](https://wywcuhdexiiitliibpnu.supabase.co/functions/v1/ingest)`**
   Recibe datos de la placa.
 
   * Valida payload.
