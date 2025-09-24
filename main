@@ -2,65 +2,28 @@ import network
 import socket
 from time import sleep, ticks_ms
 import machine
-import select
 import ujson
 from dht import DHT22
+import urequests
 
 # Configuración de pines
 LED_PIN = 2
 DHT_PIN = 13
 led = machine.Pin(LED_PIN, machine.Pin.OUT)
 dht_sensor = DHT22(machine.Pin(DHT_PIN))
-boot_button = machine.Pin(0, machine.Pin.IN)
 
-# Frecuencia de lectura inicial en milisegundos (10 segundos)
-reading_frequency = 10000
+# Frecuencia de lectura y envío en milisegundos
+reading_frequency = 300000 # Envío cada 5 minutos
 last_reading_time = 0
 humidity = -1.0
 temperature = -1.0
 
-# Intenta cargar las credenciales de Wi-Fi guardadas
-def load_credentials():
-    try:
-        with open('wifi.txt', 'r') as f:
-            ssid = f.readline().strip()
-            password = f.readline().strip()
-            return ssid, password
-    except OSError:
-        return None, None
+# Credenciales de Supabase
+supabase_url = "xxxxx"
+supabase_key = "xxxxx"
+supabase_insert_url = supabase_url + "/rest/v1/readings"
 
-def do_connect():
-    """Intenta conectar a una red Wi-Fi."""
-    global led, temperature, humidity
-
-    ssid, password = load_credentials()
-    if not ssid or not password:
-        print("No se encontraron credenciales. Iniciando modo AP.")
-        return False
-
-    wlan = network.WLAN(network.STA_IF)
-    wlan.active(True)
-
-    if not wlan.isconnected():
-        print(f'Conectando a la red: {ssid}')
-        wlan.connect(ssid, password)
-
-        max_wait = 20
-        while max_wait > 0 and not wlan.isconnected():
-            led.value(not led.value()) # Parpadea el LED
-            sleep(0.5)
-            max_wait -= 1
-
-    if wlan.isconnected():
-        print('Conexión exitosa!')
-        print('Configuración de red:', wlan.ifconfig())
-        led.value(1)  # Enciende el LED de forma continua
-        return True
-    else:
-        print("No se pudo conectar. Iniciando el punto de acceso para reconfiguración.")
-        led.value(0)
-        return False
-
+# --- Funciones de tu código ---
 def do_ap_mode():
     """Configura el ESP32 como punto de acceso y hostea el portal cautivo."""
     ap = network.WLAN(network.AP_IF)
@@ -68,11 +31,10 @@ def do_ap_mode():
     ap.config(essid='ESP32-CONFIG', password='micropython')
     print('Punto de acceso activado. Conectate a "ESP32-CONFIG"')
     print('Dirección IP del AP:', ap.ifconfig()[0])
-    
+
     web_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     web_server.bind(('', 80))
     web_server.listen(5)
-
     html = """
     <html>
         <head>
@@ -90,43 +52,41 @@ def do_ap_mode():
                 <h2>Configuracion de WiFi</h2>
                 <form action="/config">
                     <input type="text" name="ssid" placeholder="Nombre de la red (SSID)"><br>
-                    <input type="password" name="password" placeholder="Contraseña"><br>
+                    <input type="password" name="password" placeholder="password"><br>
                     <button type="submit">Conectar</button>
                 </form>
             </div>
         </body>
     </html>
     """
-    
+
     while True:
         try:
             conn, addr = web_server.accept()
             request = conn.recv(1024)
             request = str(request)
-            
+
             if "GET /config" in request:
                 conn.send('HTTP/1.1 200 OK\nContent-Type: text/html\n\n')
                 conn.send('<h1>Credenciales guardadas! Reiniciando...</h1><p>Por favor, espere.</p>')
-                
+
                 ssid_start = request.find("ssid=") + 5
                 ssid_end = request.find("&", ssid_start)
                 new_ssid = request[ssid_start:ssid_end].replace('%20', ' ').replace('+', ' ')
-                
+
                 password_start = request.find("password=") + 9
                 password_end = request.find(" ", password_start)
                 new_password = request[password_start:password_end].replace('%20', ' ').replace('+', ' ')
-
                 with open('wifi.txt', 'w') as f:
                     f.write(new_ssid + '\n')
                     f.write(new_password + '\n')
-                
+
                 print("Credenciales guardadas. Reiniciando...")
                 sleep(2)
                 machine.reset()
             else:
                 conn.send('HTTP/1.1 200 OK\nContent-Type: text/html\n\n')
                 conn.send(html)
-
             conn.close()
         except OSError:
             pass
@@ -144,63 +104,60 @@ def read_dht():
         temperature = -1.0
         humidity = -1.0
 
-def start_api_server():
-    """Inicia el servidor web para la API RESTful."""
-    global temperature, humidity, reading_frequency
+# --- Nueva función para enviar datos a Supabase ---
+def send_to_supabase(temp, hum):
+    """Envía los datos de temperatura y humedad a Supabase."""
+    print("Enviando datos a Supabase...")
+    headers = {
+        "apikey": supabase_key,
+        "Authorization": f"Bearer {supabase_key}",
+        "Content-Type": "application/json"
+    }
+    data = ujson.dumps({"temperature": temp, "humidity": hum})
 
-    addr = socket.getaddrinfo('0.0.0.0', 80)[0][-1]
-    api_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    api_server.bind(addr)
-    api_server.listen(5)
-    print("Servidor API RESTful iniciado.")
+    try:
+        response = urequests.post(supabase_insert_url, headers=headers, data=data)
+        print(f"Código de respuesta HTTP: {response.status_code}")
+        response.close()
+    except Exception as e:
+        print(f"Error al enviar datos a Supabase: {e}")
 
-    while True:
-        current_time = ticks_ms()
-        if ticks_ms() - last_reading_time >= reading_frequency:
-            read_dht()
-            last_reading_time = ticks_ms()
-            
-        try:
-            conn, addr = api_server.accept()
-            request = conn.recv(1024)
-            request_str = request.decode('utf-8')
-
-            # Maneja la ruta /data
-            if "GET /data" in request_str:
-                response_data = {"temperature": temperature, "humidity": humidity}
-                response_json = ujson.dumps(response_data)
-                conn.send('HTTP/1.1 200 OK\nContent-Type: application/json\n\n')
-                conn.send(response_json)
-            
-            # Maneja la ruta /set_freq
-            elif "GET /set_freq?" in request_str:
-                query_params = request_str.split("?")[1]
-                params = dict(param.split("=") for param in query_params.split("&"))
-                if "freq" in params:
-                    try:
-                        new_freq = int(params["freq"])
-                        reading_frequency = max(new_freq, 1000) # Frecuencia minima de 1 segundo
-                        conn.send('HTTP/1.1 200 OK\nContent-Type: text/plain\n\n')
-                        conn.send(f"Frecuencia de lectura actualizada a {reading_frequency} ms.")
-                    except ValueError:
-                        conn.send('HTTP/1.1 400 Bad Request\nContent-Type: text/plain\n\n')
-                        conn.send("Error: 'freq' debe ser un numero entero.")
-                else:
-                    conn.send('HTTP/1.1 400 Bad Request\nContent-Type: text/plain\n\n')
-                    conn.send("Error: Parametro 'freq' no encontrado.")
-            
-            # Maneja la ruta raiz y otras
-            else:
-                conn.send('HTTP/1.1 200 OK\nContent-Type: text/plain\n\n')
-                conn.send("API RESTful ESP32 para Estacion Meteorologica")
-
-            conn.close()
-        except OSError:
-            pass
-
-# Lógica principal del programa
+# --- Lógica principal del programa ---
 if __name__ == "__main__":
-    if not do_connect():
+    wlan = network.WLAN(network.STA_IF)
+    if not wlan.isconnected():
         do_ap_mode()
     else:
-        start_api_server()
+        # Se inicializa el servidor web solo una vez y se hace no bloqueante.
+        addr = socket.getaddrinfo('0.0.0.0', 80)[0][-1]
+        api_server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        api_server.bind(addr)
+        api_server.listen(1)
+        api_server.setblocking(False)
+
+        while True:
+            # Lógica para leer el sensor y enviar datos a Supabase
+            current_time = ticks_ms()
+            if current_time - last_reading_time >= reading_frequency:
+                read_dht()
+                if temperature != -1.0 and humidity != -1.0:
+                    send_to_supabase(temperature, humidity)
+                last_reading_time = current_time
+
+            
+            try:
+                conn, addr = api_server.accept()
+                req = conn.recv(1024)
+                req_str = req.decode('utf-8')
+                
+                if "GET /data" in req_str:
+                    response_data = {"temperature": temperature, "humidity": humidity}
+                    response_json = ujson.dumps(response_data)
+                    conn.send(b'HTTP/1.1 200 OK\nContent-Type: application/json\n\n')
+                    conn.send(response_json)
+                conn.close()
+            except OSError:
+                # Esto es normal cuando no hay conexiones entrantes, se ignora
+                pass
+            
+            sleep(0.1)
