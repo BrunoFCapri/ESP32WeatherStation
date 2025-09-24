@@ -1,23 +1,24 @@
-// Edge Function para consulta histórica con soporte de granularidad y estadísticas (mean, min, max).
-// No incluye mock: requiere credenciales de InfluxDB válidas. Devuelve error si faltan.
-// Parámetros:
-//   from (ISO8601, obligatorio)
-//   to (ISO8601, obligatorio, > from)
-//   granularity = raw|1m|5m|15m|1h|1d (por defecto raw)
-//   stats = lista separada por comas: mean,min,max (solo aplica si granularity != raw; default mean)
-//
-// Si granularity = raw -> ignora stats, devuelve lecturas crudas pivotadas (temperatura, humedad)
-// Si granularity != raw:
-//   - Si stats = una sola (ej: mean): devuelve [{ ts, temperatura, humedad }]
-//   - Si stats = varias (ej: mean,min,max): devuelve [{ ts, stat, temperatura, humedad }, ...]
-//
-// Declaraciones para evitar errores de tipos en entornos sin Deno typings (Supabase Edge / Deno runtime).
-// deno-lint-ignore no-explicit-any
-declare const Deno: any;
-// deno-lint-ignore no-explicit-any
-declare const serve: any;
+import { serve } from 'https://deno.land/std/http/server.ts'
 
-serve(async (req: any) => {
+/**
+ * Edge Function for historical data queries with granularity and statistics support
+ * GET /functions/v1/historic?from=ISO8601&to=ISO8601&granularity=raw|1m|5m|15m|1h|1d&stats=mean,min,max
+ * 
+ * Requires InfluxDB credentials - no mock fallback
+ * 
+ * Parameters:
+ *   from (ISO8601, required) - Start date/time
+ *   to (ISO8601, required) - End date/time (must be > from)  
+ *   granularity (optional) - Data aggregation level: raw|1m|5m|15m|1h|1d (default: raw)
+ *   stats (optional) - Statistics to calculate: mean,min,max (default: mean, only applies if granularity != raw)
+ *
+ * Response formats:
+ * - Raw data: [{ "ts": "ISO8601", "temperatura": number, "humedad": number }]
+ * - Single stat: [{ "ts": "ISO8601", "temperatura": number, "humedad": number }]  
+ * - Multiple stats: [{ "ts": "ISO8601", "stat": "mean|min|max", "temperatura": number, "humedad": number }]
+ */
+
+serve(async (req: Request) => {
   try {
     if (req.method !== "GET") {
       return json({ error: "Method not allowed" }, 405);
@@ -51,7 +52,7 @@ serve(async (req: any) => {
       );
     }
 
-    // Validación de fechas
+    // Date validation
     let startDate: Date;
     let endDate: Date;
     try {
@@ -73,10 +74,10 @@ serve(async (req: any) => {
       return json({ error: "Invalid date(s)", detail: String(e) }, 400);
     }
 
-    // Parseo y validación de stats (solo si NO es raw)
+    // Parse and validate stats (only if NOT raw)
     let stats: string[] = [];
     if (g.unit === "raw") {
-      stats = []; // no se usa
+      stats = []; // not used
     } else {
       stats = statsParam
         .split(",")
@@ -98,7 +99,7 @@ serve(async (req: any) => {
           );
         }
       }
-      // Eliminar duplicados
+      // Remove duplicates
       stats = Array.from(new Set(stats));
     }
 
@@ -111,27 +112,35 @@ serve(async (req: any) => {
   }
 });
 
+// TypeScript type definitions
 type Sample = { ts: string; temperatura: number; humedad: number };
 type StatSample = Sample & { stat?: string };
+type GranularityRaw = { unit: "raw" };
+type GranularityAggregated = { unit: "minute" | "hour" | "day"; size: number };
+type Granularity = GranularityRaw | GranularityAggregated;
 
-// Variables de entorno para InfluxDB
+// InfluxDB environment variables (required - no fallback)
 const INFLUX_URL = Deno.env.get("INFLUX_URL");
 const INFLUX_ORG = Deno.env.get("INFLUX_ORG");
 const INFLUX_BUCKET = Deno.env.get("INFLUX_BUCKET");
 const INFLUX_TOKEN = Deno.env.get("INFLUX_TOKEN");
 
-function json(body: unknown, status = 200) {
+/**
+ * Creates a JSON response with proper headers
+ */
+function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
 }
 
-function normalizeGranularity(
-  input: string
-): { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number } | null {
+/**
+ * Normalizes granularity string into structured format
+ */
+function normalizeGranularity(input: string): Granularity | null {
   if (input === "raw") return { unit: "raw" };
-  const map: Record<string, { unit: "minute" | "hour" | "day"; size: number }> = {
+  const map: Record<string, GranularityAggregated> = {
     "1m": { unit: "minute", size: 1 },
     "5m": { unit: "minute", size: 5 },
     "15m": { unit: "minute", size: 15 },
@@ -141,15 +150,19 @@ function normalizeGranularity(
   return map[input] ?? null;
 }
 
+/**
+ * Converts date string to RFC3339 format (ISO with Z)
+ */
 function toRFC3339Z(s: string): string {
   const d = new Date(s);
   if (isNaN(d.getTime())) throw new Error("Invalid date: " + s);
   return d.toISOString();
 }
 
-function granularityToFluxEvery(
-  g: { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number }
-): string | null {
+/**
+ * Converts granularity to Flux aggregation period
+ */
+function granularityToFluxEvery(g: Granularity): string | null {
   if (g.unit === "raw") return null;
   if (g.unit === "minute") return `${g.size}m`;
   if (g.unit === "hour") return `${g.size}h`;
@@ -157,10 +170,13 @@ function granularityToFluxEvery(
   return null;
 }
 
+/**
+ * Main function to fetch historical data from InfluxDB
+ */
 async function fetchHistoricalData(
   from: string,
   to: string,
-  g: { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number },
+  g: Granularity,
   stats: string[]
 ): Promise<StatSample[]> {
   const missingEnv: string[] = [];
@@ -171,17 +187,21 @@ async function fetchHistoricalData(
 
   if (missingEnv.length > 0) {
     throw new Error(
-      "Missing InfluxDB environment variables: " + missingEnv.join(", ")
+      "Missing InfluxDB environment variables: " + missingEnv.join(", ") + 
+      ". This function requires InfluxDB to be properly configured."
     );
   }
 
   return await fetchFromInflux(from, to, g, stats);
 }
 
+/**
+ * Executes Flux query against InfluxDB and processes results
+ */
 async function fetchFromInflux(
   from: string,
   to: string,
-  g: { unit: "raw" } | { unit: "minute" | "hour" | "day"; size: number },
+  g: Granularity,
   stats: string[]
 ): Promise<StatSample[]> {
   const start = toRFC3339Z(from);
@@ -191,7 +211,7 @@ async function fetchFromInflux(
   let flux: string;
 
   if (g.unit === "raw") {
-    // Versión cruda (sin aggregateWindow)
+    // Raw data query (no aggregation)
     flux = `from(bucket: "${INFLUX_BUCKET}")
   |> range(start: time(v: "${start}"), stop: time(v: "${stop}"))
   |> filter(fn: (r) => r._measurement == "readings")
@@ -200,9 +220,7 @@ async function fetchFromInflux(
   |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
   |> sort(columns: ["_time"])`;
   } else {
-    // Construimos pipelines por cada estadística solicitada
-    // Cada uno se marca con _stat para pivot posterior.
-    // Luego unimos con union().
+    // Aggregated data query with statistics
     const pipelines = stats.map((st) => {
       const fnMap: Record<string, string> = {
         mean: "mean",
@@ -243,18 +261,22 @@ union(tables: [${pipelines.join(",")}])
 
   if (!resp.ok) {
     const text = await resp.text();
-    throw new Error(`Influx error ${resp.status}: ${text}`);
+    throw new Error(`InfluxDB query failed: ${resp.status} ${resp.statusText} - ${text}`);
   }
 
   const csv = await resp.text();
   return parseInfluxCSV(csv, g.unit !== "raw" && stats.length > 1);
 }
 
+/**
+ * Parses CSV response from InfluxDB into structured data
+ */
 function parseInfluxCSV(csv: string, hasStat: boolean): StatSample[] {
   const lines = csv
     .split(/\r?\n/)
     .filter((l) => l.trim().length > 0 && !l.startsWith("#"));
   if (lines.length === 0) return [];
+  
   const header = lines[0].split(",");
   const idxTime = header.indexOf("_time");
   const idxTemp = header.indexOf("temperatura");
@@ -267,17 +289,18 @@ function parseInfluxCSV(csv: string, hasStat: boolean): StatSample[] {
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split(",");
     if (cols.length < header.length) continue;
+    
     const ts = cols[idxTime];
     const tStr = idxTemp >= 0 ? cols[idxTemp] : "";
     const hStr = idxHum >= 0 ? cols[idxHum] : "";
     const temperatura = tStr ? Number(tStr) : NaN;
     const humedad = hStr ? Number(hStr) : NaN;
+    
     if (!isNaN(temperatura) && !isNaN(humedad)) {
       if (hasStat && idxStat >= 0) {
         out.push({
           ts,
-            // Remarcamos 'stat' sólo si se pidió más de una estadística
-          stat: cols[idxStat],
+          stat: cols[idxStat], // Include stat field when multiple statistics requested
           temperatura,
           humedad,
         });

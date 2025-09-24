@@ -72,36 +72,42 @@ La arquitectura debe:
 
 ---
 
-## ⚙️ API Intermedia (Edge Functions en Supabase)
+## ⚙️ API Intermedia (Edge Functions en Supabase) - ✅ IMPLEMENTADO
 
-### Endpoints propuestos
+### Endpoints disponibles
 
-* **POST `functions/v1/ingest`**  
+* **POST `functions/v1/ingest`** ✅  
   Recibe datos de la placa.
 
-  * Valida payload.
-  * Actualiza `resumen_dia` en Supabase.
-  * Inserta registro en `readings` (serie temporal).
+  * ✅ Valida payload con tipos estrictos.
+  * ✅ Actualiza `resumen_dia` en Supabase.
+  * ✅ Inserta registro en `readings` (serie temporal) vía InfluxDB.
+  * ✅ **Sin mock**: Requiere credenciales de InfluxDB válidas.
+  * ✅ Manejo de errores mejorado con respuestas JSON estructuradas.
 
-* **GET `functions/v1/daily?fecha=YYYY-MM-DD`**  
+* **GET `functions/v1/daily?fecha=YYYY-MM-DD`** ✅  
   Devuelve los datos consolidados de un día específico desde Supabase.
 
+  * ✅ Validación de parámetros y formato de fecha.
+  * ✅ Manejo de errores específicos (404 para fechas sin datos).
+  * ✅ Respuestas JSON consistentes.
 
-* **GET `functions/v1/historic?from=YYYY-MM-DD&to=YYYY-MM-DD`**  
-  (Nombre actualizado: antes `historical`). Devuelve datos desde la DB de series temporales (para gráficas detalladas).  
-  Soporta agregación por granularidad y estadísticas:
+* **GET `functions/v1/historic?from=YYYY-MM-DD&to=YYYY-MM-DD`** ✅  
+  Devuelve datos desde la DB de series temporales (InfluxDB) para gráficas detalladas.  
+  ✅ **Implementación completa** con soporte de agregación por granularidad y estadísticas:
 
-  - Parámetro opcional `granularity`:
-    - Valores: `raw` (por defecto), `1m`, `5m`, `15m`, `1h`, `1d`.
-    - Comportamiento:
-      - `raw`: devuelve lecturas crudas (ignora `stats`).
-      - `1m|5m|15m|1h|1d`: agrega por bucket de tiempo devolviendo estadísticas de `temperatura` y `humedad`.
+  - ✅ Parámetro `granularity`: `raw` (por defecto), `1m`, `5m`, `15m`, `1h`, `1d`.
+    - `raw`: devuelve lecturas crudas (ignora `stats`).
+    - `1m|5m|15m|1h|1d`: agrega por bucket de tiempo devolviendo estadísticas de `temperatura` y `humedad`.
 
-  - Parámetro opcional `stats` (solo aplica si `granularity != raw`):
-    - Valores separados por coma: `mean`, `min`, `max`.
+  - ✅ Parámetro `stats` (solo aplica si `granularity != raw`): `mean`, `min`, `max`.
     - Por defecto: `mean`.
-    - Si se solicita una sola estadística (ej: `mean`), la respuesta no incluye campo `stat`.
-    - Si se solicitan varias (ej: `mean,min,max`), se devuelve una fila por estadística y timestamp con campo `stat`.
+    - Si se solicita una sola estadística, la respuesta no incluye campo `stat`.
+    - Si se solicitan varias, se devuelve una fila por estadística y timestamp con campo `stat`.
+
+  - ✅ **Sin mock**: Requiere credenciales de InfluxDB válidas.
+  - ✅ Validación robusta de parámetros y fechas.
+  - ✅ Consultas Flux optimizadas para InfluxDB.
 
   - Ejemplos:
     - `/api/data/historic?from=2025-09-01&to=2025-09-07` → datos crudos.
@@ -132,14 +138,14 @@ La arquitectura debe:
 
 ---
 
-## 🔌 Integración con InfluxDB (S4R)
+## 🔌 Integración con InfluxDB (S4R) - ✅ IMPLEMENTADO
 
-El backend histórico está integrado con **InfluxDB** (proveedor S4R) vía la API de consultas **Flux**. La Edge Function intenta usar Influx cuando encuentra las siguientes variables de entorno, y s[...]
+El backend histórico está **completamente integrado** con **InfluxDB** (proveedor S4R) vía la API de consultas **Flux**. Las Edge Functions requieren las siguientes variables de entorno (sin fallback mock):
 
 - `INFLUX_URL`: URL base de InfluxDB (ej: `https://influx.example.com`)
 - `INFLUX_ORG`: Organización de InfluxDB
 - `INFLUX_BUCKET`: Bucket de datos (ej: `weather`)
-- `INFLUX_TOKEN`: Token con permisos de lectura sobre el bucket
+- `INFLUX_TOKEN`: Token con permisos de lectura/escritura sobre el bucket
 
 ### Consulta y agregación
 
