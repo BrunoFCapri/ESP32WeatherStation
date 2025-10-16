@@ -6,37 +6,72 @@ const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// CORS configuration
+const ALLOWED_ORIGIN = "https://clima-zero.vercel.app";
+
+function buildCorsHeaders(origin: string): HeadersInit {
+  const headers: Record<string, string> = {
+    "Vary": "Origin",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, content-type, apikey, x-client-info",
+    "Access-Control-Max-Age": "86400",
+  };
+  if (origin === ALLOWED_ORIGIN) {
+    headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN;
+  }
+  return headers;
+}
+
+function json(body: unknown, status = 200, extraHeaders?: HeadersInit): Response {
+  const headers = new Headers({ "content-type": "application/json; charset=utf-8" });
+  if (extraHeaders) {
+    for (const [k, v] of Object.entries(extraHeaders as Record<string, string>)) {
+      headers.set(k, v);
+    }
+  }
+  return new Response(JSON.stringify(body), { status, headers });
+}
+
 /**
  * Edge Function to get daily summary data from Supabase
  * GET /functions/v1/daily?fecha=YYYY-MM-DD
  * Returns consolidated data for a specific date from resumen_dia table
  */
-serve(async (req) => {
+serve(async (req: Request) => {
+  const origin = req.headers.get("origin") || "";
+
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: buildCorsHeaders(origin) });
+  }
+
   if (req.method !== "GET") {
-    return new Response("Method Not Allowed", { status: 405 });
+    return json({ error: "Method Not Allowed" }, 405, buildCorsHeaders(origin));
   }
 
   const url = new URL(req.url);
   const fecha = url.searchParams.get("fecha");
   
   if (!fecha) {
-    return new Response(
-      JSON.stringify({ 
+    return json(
+      { 
         error: "Missing fecha parameter", 
         example: "/functions/v1/daily?fecha=2025-01-15" 
-      }), 
-      { status: 400, headers: { "content-type": "application/json" } }
+      },
+      400,
+      buildCorsHeaders(origin)
     );
   }
 
   // Validate date format
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
-    return new Response(
-      JSON.stringify({ 
+    return json(
+      { 
         error: "Invalid date format", 
         expected: "YYYY-MM-DD" 
-      }), 
-      { status: 400, headers: { "content-type": "application/json" } }
+      },
+      400,
+      buildCorsHeaders(origin)
     );
   }
 
@@ -50,30 +85,22 @@ serve(async (req) => {
     if (error) {
       if (error.code === 'PGRST116') {
         // No data found for this date
-        return new Response(
-          JSON.stringify({ 
+        return json(
+          { 
             error: "No data found for the specified date",
             date: fecha 
-          }), 
-          { status: 404, headers: { "content-type": "application/json" } }
+          },
+          404,
+          buildCorsHeaders(origin)
         );
       }
       console.error("Supabase error:", error);
-      return new Response(
-        JSON.stringify({ error: "Database error" }), 
-        { status: 500, headers: { "content-type": "application/json" } }
-      );
+      return json({ error: "Database error" }, 500, buildCorsHeaders(origin));
     }
 
-    return new Response(
-      JSON.stringify(data), 
-      { status: 200, headers: { "content-type": "application/json" } }
-    );
+    return json(data, 200, buildCorsHeaders(origin));
   } catch (err) {
     console.error("Unexpected error:", err);
-    return new Response(
-      JSON.stringify({ error: "Internal Server Error" }), 
-      { status: 500, headers: { "content-type": "application/json" } }
-    );
+    return json({ error: "Internal Server Error" }, 500, buildCorsHeaders(origin));
   }
 });
