@@ -18,10 +18,35 @@ import { serve } from 'https://deno.land/std/http/server.ts'
  * - Multiple stats: [{ "ts": "ISO8601", "stat": "mean|min|max", "temperatura": number, "humedad": number }]
  */
 
+// CORS configuration
+const ALLOWED_ORIGIN = "https://clima-zero.vercel.app";
+
+function buildCorsHeaders(origin: string): HeadersInit {
+  const headers: Record<string, string> = {
+    "Vary": "Origin",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
+    "Access-Control-Allow-Headers": "authorization, content-type, apikey, x-client-info",
+    "Access-Control-Max-Age": "86400",
+  };
+  if (origin === ALLOWED_ORIGIN) {
+    headers["Access-Control-Allow-Origin"] = ALLOWED_ORIGIN;
+  }
+  return headers;
+}
+
 serve(async (req: Request) => {
+  const origin = req.headers.get("origin") || "";
   try {
+    // Handle CORS preflight
+    if (req.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: buildCorsHeaders(origin),
+      });
+    }
+
     if (req.method !== "GET") {
-      return json({ error: "Method not allowed" }, 405);
+      return json({ error: "Method not allowed" }, 405, buildCorsHeaders(origin));
     }
 
     const url = new URL(req.url);
@@ -37,7 +62,8 @@ serve(async (req: Request) => {
           required: ["from", "to"],
           example: "/functions/v1/historic?from=2025-09-01T00:00:00Z&to=2025-09-02T00:00:00Z&granularity=1h&stats=mean,min,max",
         },
-        400
+        400,
+        buildCorsHeaders(origin)
       );
     }
 
@@ -48,7 +74,8 @@ serve(async (req: Request) => {
           error: "Invalid granularity",
           allowed: ["raw", "1m", "5m", "15m", "1h", "1d"],
         },
-        400
+        400,
+        buildCorsHeaders(origin)
       );
     }
 
@@ -67,11 +94,12 @@ serve(async (req: Request) => {
             error: "Invalid range",
             detail: "`from` must be strictly earlier than `to`",
           },
-          400
+          400,
+          buildCorsHeaders(origin)
         );
       }
     } catch (e) {
-      return json({ error: "Invalid date(s)", detail: String(e) }, 400);
+      return json({ error: "Invalid date(s)", detail: String(e) }, 400, buildCorsHeaders(origin));
     }
 
     // Parse and validate stats (only if NOT raw)
@@ -95,7 +123,8 @@ serve(async (req: Request) => {
               invalid: st,
               allowed: ["mean", "min", "max"],
             },
-            400
+            400,
+            buildCorsHeaders(origin)
           );
         }
       }
@@ -105,10 +134,10 @@ serve(async (req: Request) => {
 
     const samples = await fetchHistoricalData(from, to, g, stats);
 
-    return json(samples, 200);
+    return json(samples, 200, buildCorsHeaders(origin));
   } catch (e) {
     console.error("Unhandled error:", e);
-    return json({ error: "Internal Server Error", detail: String(e) }, 500);
+    return json({ error: "Internal Server Error", detail: String(e) }, 500, buildCorsHeaders(origin));
   }
 });
 
@@ -128,10 +157,16 @@ const INFLUX_TOKEN = Deno.env.get("INFLUX_TOKEN");
 /**
  * Creates a JSON response with proper headers
  */
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, status = 200, extraHeaders?: HeadersInit): Response {
+  const headers = new Headers({ "content-type": "application/json; charset=utf-8" });
+  if (extraHeaders) {
+    for (const [k, v] of Object.entries(extraHeaders as Record<string, string>)) {
+      headers.set(k, v);
+    }
+  }
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8" },
+    headers,
   });
 }
 
