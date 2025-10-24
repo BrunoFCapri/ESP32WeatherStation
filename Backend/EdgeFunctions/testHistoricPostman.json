@@ -16,7 +16,7 @@
     ]
   },
   "variable": [
-    { "key": "BASE_URL", "value": "https://YOUR-PROJECT.functions.supabase.co" },
+    { "key": "BASE_URL", "value": "https://wywcuhdexiiitliibpnu.supabase.co" },
     { "key": "SUPABASE_ANON_KEY", "value": "YOUR_SUPABASE_ANON_KEY" },
     { "key": "FROM", "value": "2025-10-16T00:00:00Z" },
     { "key": "TO", "value": "2025-10-17T00:00:00Z" },
