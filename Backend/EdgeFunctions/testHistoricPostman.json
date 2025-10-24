@@ -1,0 +1,814 @@
+{
+  "info": {
+    "_postman_id": "1f54d41b-0c5e-4f9c-9b0d-3b3a2a2c4f00",
+    "name": "ESP32WeatherStation – historic.ts API Tests (Supabase Edge Functions)",
+    "description": "Banco de pruebas para GET /functions/v1/historic con Supabase anon key, obviando CORS.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "type": "string",
+        "value": "{{SUPABASE_ANON_KEY}}"
+      }
+    ]
+  },
+  "variable": [
+    { "key": "BASE_URL", "value": "https://YOUR-PROJECT.functions.supabase.co" },
+    { "key": "SUPABASE_ANON_KEY", "value": "YOUR_SUPABASE_ANON_KEY" },
+    { "key": "FROM", "value": "2025-09-01T00:00:00Z" },
+    { "key": "TO", "value": "2025-09-02T00:00:00Z" },
+    { "key": "FROM_NO_DATA", "value": "1900-01-01T00:00:00Z" },
+    { "key": "TO_NO_DATA", "value": "1900-01-02T00:00:00Z" }
+  ],
+  "item": [
+    {
+      "name": "01) Método no permitido (POST => 405)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 405', () => pm.response.to.have.status(405));",
+              "const body = pm.response.json();",
+              "pm.test('Error message', () => pm.expect(body.error).to.eql('Method not allowed'));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "Expected 405",
+          "originalRequest": {
+            "method": "POST",
+            "header": [
+              { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": { "raw": "{{BASE_URL}}/functions/v1/historic" }
+          },
+          "status": "Method Not Allowed",
+          "code": 405,
+          "header": [
+            { "key": "Content-Type", "value": "application/json; charset=utf-8" }
+          ],
+          "body": "{\"error\":\"Method not allowed\"}"
+        }
+      ]
+    },
+    {
+      "name": "02) Falta parámetro from (=> 400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?to={{TO}}",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "to", "value": "{{TO}}" }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 400', () => pm.response.to.have.status(400));",
+              "const b = pm.response.json();",
+              "pm.test('Missing parameters', () => pm.expect(b.error).to.eql('Missing parameters'));",
+              "pm.test('Required keys', () => pm.expect(b.required).to.eql(['from','to']));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "Expected 400 Missing parameters",
+          "status": "Bad Request",
+          "code": 400,
+          "header": [
+            { "key": "Content-Type", "value": "application/json; charset=utf-8" }
+          ],
+          "body": "{\"error\":\"Missing parameters\",\"required\":[\"from\",\"to\"],\"example\":\"/functions/v1/historic?from=2025-09-01T00:00:00Z&to=2025-09-02T00:00:00Z&granularity=1h&stats=mean,min,max\"}"
+        }
+      ]
+    },
+    {
+      "name": "03) Falta parámetro to (=> 400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 400', () => pm.response.to.have.status(400));",
+              "const b = pm.response.json();",
+              "pm.test('Missing parameters', () => pm.expect(b.error).to.eql('Missing parameters'));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "Expected 400 Missing parameters",
+          "status": "Bad Request",
+          "code": 400,
+          "header": [
+            { "key": "Content-Type", "value": "application/json; charset=utf-8" }
+          ],
+          "body": "{\"error\":\"Missing parameters\",\"required\":[\"from\",\"to\"],\"example\":\"/functions/v1/historic?from=2025-09-01T00:00:00Z&to=2025-09-02T00:00:00Z&granularity=1h&stats=mean,min,max\"}"
+        }
+      ]
+    },
+    {
+      "name": "04) Fecha inválida (from) (=> 400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from=INVALID&to={{TO}}",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "INVALID" },
+            { "key": "to", "value": "{{TO}}" }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 400', () => pm.response.to.have.status(400));",
+              "const b = pm.response.json();",
+              "pm.test('Invalid date(s)', () => pm.expect(b.error).to.eql('Invalid date(s)'));",
+              "pm.test('Detail mentions Invalid date format', () => pm.expect(String(b.detail)).to.include('Invalid date format'));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "Expected 400 Invalid date(s)",
+          "status": "Bad Request",
+          "code": 400,
+          "header": [
+            { "key": "Content-Type", "value": "application/json; charset=utf-8" }
+          ],
+          "body": "{\"error\":\"Invalid date(s)\",\"detail\":\"Error: Invalid date format\"}"
+        }
+      ]
+    },
+    {
+      "name": "05) Rango inválido: from == to (=> 400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{FROM}}",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{FROM}}" }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 400', () => pm.response.to.have.status(400));",
+              "const b = pm.response.json();",
+              "pm.test('Invalid range', () => pm.expect(b.error).to.eql('Invalid range'));",
+              "pm.test('Detail message', () => pm.expect(b.detail).to.eql('`from` must be strictly earlier than `to`'));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "Expected 400 Invalid range",
+          "status": "Bad Request",
+          "code": 400,
+          "header": [
+            { "key": "Content-Type", "value": "application/json; charset=utf-8" }
+          ],
+          "body": "{\"error\":\"Invalid range\",\"detail\":\"`from` must be strictly earlier than `to`\"}"
+        }
+      ]
+    },
+    {
+      "name": "06) Rango inválido: from > to (=> 400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{TO}}&to={{FROM}}",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{TO}}" },
+            { "key": "to", "value": "{{FROM}}" }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 400', () => pm.response.to.have.status(400));",
+              "const b = pm.response.json();",
+              "pm.test('Invalid range', () => pm.expect(b.error).to.eql('Invalid range'));",
+              "pm.test('Detail message', () => pm.expect(b.detail).to.eql('`from` must be strictly earlier than `to`'));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "Expected 400 Invalid range",
+          "status": "Bad Request",
+          "code": 400,
+          "header": [
+            { "key": "Content-Type", "value": "application/json; charset=utf-8" }
+          ],
+          "body": "{\"error\":\"Invalid range\",\"detail\":\"`from` must be strictly earlier than `to`\"}"
+        }
+      ]
+    },
+    {
+      "name": "07) Por defecto granularity=raw (=> 200, datos crudos)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const arr = pm.response.json();",
+              "pm.test('Es array', () => pm.expect(arr).to.be.an('array'));",
+              "if (arr.length) {",
+              "  pm.test('Campos sin stat', () => {",
+              "    pm.expect(arr[0]).to.have.keys(['ts','temperatura','humedad']);",
+              "    pm.expect(arr[0]).to.not.have.property('stat');",
+              "  });",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "response": [
+        {
+          "name": "Expected 200 raw (ejemplo)",
+          "status": "OK",
+          "code": 200,
+          "header": [
+            { "key": "Content-Type", "value": "application/json; charset=utf-8" }
+          ],
+          "body": "[{\"ts\":\"2025-09-01T00:00:00Z\",\"temperatura\":22.3,\"humedad\":49.8}]"
+        }
+      ]
+    },
+    {
+      "name": "08) granularity=RAW (case-insensitive => 200)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}&granularity=RAW",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" },
+            { "key": "granularity", "value": "RAW" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [ "pm.test('Status 200', () => pm.response.to.have.status(200));" ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 200 raw (ejemplo)",
+          "status": "OK",
+          "code": 200,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "[{\"ts\":\"2025-09-01T00:00:00Z\",\"temperatura\":22.3,\"humedad\":49.8}]"
+        }
+      ]
+    },
+    {
+      "name": "09) granularity inválida (10m => 400)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}&granularity=10m",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" },
+            { "key": "granularity", "value": "10m" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [
+          "pm.test('Status 400', () => pm.response.to.have.status(400));",
+          "const b = pm.response.json();",
+          "pm.test('Invalid granularity', () => pm.expect(b.error).to.eql('Invalid granularity'));",
+          "pm.test('Allowed list present', () => pm.expect(b.allowed).to.eql(['raw','1m','5m','15m','1h','1d']));"
+        ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 400 invalid granularity",
+          "status": "Bad Request",
+          "code": 400,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "{\"error\":\"Invalid granularity\",\"allowed\":[\"raw\",\"1m\",\"5m\",\"15m\",\"1h\",\"1d\"]}"
+        }
+      ]
+    },
+    {
+      "name": "10) granularity=1m (=> 200, mean por defecto, sin stat)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}&granularity=1m",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" },
+            { "key": "granularity", "value": "1m" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [
+          "pm.test('Status 200', () => pm.response.to.have.status(200));",
+          "const arr = pm.response.json();",
+          "pm.test('Es array', () => pm.expect(arr).to.be.an('array'));",
+          "if (arr.length) {",
+          "  pm.test('Sin stat', () => pm.expect(arr[0]).to.not.have.property('stat'));",
+          "}"
+        ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 200 aggregated 1m (ejemplo)",
+          "status": "OK",
+          "code": 200,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "[{\"ts\":\"2025-09-01T00:00:00Z\",\"temperatura\":22.3,\"humedad\":49.8}]"
+        }
+      ]
+    },
+    {
+      "name": "11) granularity=5m (=> 200)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}&granularity=5m",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" },
+            { "key": "granularity", "value": "5m" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [ "pm.test('Status 200', () => pm.response.to.have.status(200));" ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 200 aggregated 5m (ej.)",
+          "status": "OK",
+          "code": 200,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "[{\"ts\":\"2025-09-01T00:00:00Z\",\"temperatura\":22.3,\"humedad\":49.8}]"
+        }
+      ]
+    },
+    {
+      "name": "12) granularity=15m (=> 200)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}&granularity=15m",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" },
+            { "key": "granularity", "value": "15m" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [ "pm.test('Status 200', () => pm.response.to.have.status(200));" ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 200 aggregated 15m (ej.)",
+          "status": "OK",
+          "code": 200,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "[{\"ts\":\"2025-09-01T00:00:00Z\",\"temperatura\":22.3,\"humedad\":49.8}]"
+        }
+      ]
+    },
+    {
+      "name": "13) granularity=1h (=> 200, mean por defecto)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}&granularity=1h",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" },
+            { "key": "granularity", "value": "1h" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [
+          "pm.test('Status 200', () => pm.response.to.have.status(200));",
+          "const arr = pm.response.json();",
+          "pm.test('Sin stat por defecto', () => { if (arr.length) pm.expect(arr[0]).to.not.have.property('stat'); });"
+        ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 200 aggregated 1h (mean)",
+          "status": "OK",
+          "code": 200,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "[{\"ts\":\"2025-09-01T00:00:00Z\",\"temperatura\":22.3,\"humedad\":49.8}]"
+        }
+      ]
+    },
+    {
+      "name": "14) granularity=1d (=> 200, mean por defecto)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}&granularity=1d",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" },
+            { "key": "granularity", "value": "1d" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [
+          "pm.test('Status 200', () => pm.response.to.have.status(200));"
+        ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 200 aggregated 1d (mean)",
+          "status": "OK",
+          "code": 200,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "[{\"ts\":\"2025-09-01T00:00:00Z\",\"temperatura\":22.3,\"humedad\":49.8}]"
+        }
+      ]
+    },
+    {
+      "name": "15) Stats múltiples (mean,min,max) con 1h (=> 200 con stat por fila)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}&granularity=1h&stats=mean,min,max",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" },
+            { "key": "granularity", "value": "1h" },
+            { "key": "stats", "value": "mean,min,max" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [
+          "pm.test('Status 200', () => pm.response.to.have.status(200));",
+          "const arr = pm.response.json();",
+          "pm.test('Es array', () => pm.expect(arr).to.be.an('array'));",
+          "if (arr.length) {",
+          "  pm.test('Incluye stat válido', () => pm.expect(['mean','min','max']).to.include(arr[0].stat));",
+          "}"
+        ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 200 aggregated 1h multi-stats (ej.)",
+          "status": "OK",
+          "code": 200,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "[{\"ts\":\"2025-09-01T00:00:00Z\",\"stat\":\"mean\",\"temperatura\":22.3,\"humedad\":49.8},{\"ts\":\"2025-09-01T00:00:00Z\",\"stat\":\"min\",\"temperatura\":21.9,\"humedad\":48.7},{\"ts\":\"2025-09-01T00:00:00Z\",\"stat\":\"max\",\"temperatura\":22.9,\"humedad\":50.4}]"
+        }
+      ]
+    },
+    {
+      "name": "16) Stats con duplicados (mean,mean,max) => dedup (=> 200, sin duplicar)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}&granularity=1h&stats=mean,mean,max",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" },
+            { "key": "granularity", "value": "1h" },
+            { "key": "stats", "value": "mean,mean,max" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [
+          "pm.test('Status 200', () => pm.response.to.have.status(200));",
+          "const arr = pm.response.json();",
+          "pm.test('Es array', () => pm.expect(arr).to.be.an('array'));",
+          "if (arr.length) {",
+          "  pm.test('stat válido', () => pm.expect(['mean','min','max']).to.include(arr[0].stat));",
+          "}"
+        ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 200 deduplicado (ej.)",
+          "status": "OK",
+          "code": 200,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "[{\"ts\":\"2025-09-01T00:00:00Z\",\"stat\":\"mean\",\"temperatura\":22.3,\"humedad\":49.8},{\"ts\":\"2025-09-01T00:00:00Z\",\"stat\":\"max\",\"temperatura\":22.9,\"humedad\":50.4}]"
+        }
+      ]
+    },
+    {
+      "name": "17) Stat inválido (avg) => 400 Invalid stats parameter",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}&granularity=1h&stats=avg",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" },
+            { "key": "granularity", "value": "1h" },
+            { "key": "stats", "value": "avg" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [
+          "pm.test('Status 400', () => pm.response.to.have.status(400));",
+          "const b = pm.response.json();",
+          "pm.test('Invalid stats parameter', () => pm.expect(b.error).to.eql('Invalid stats parameter'));",
+          "pm.test('Invalid field echoes avg', () => pm.expect(b.invalid).to.eql('avg'));",
+          "pm.test('Allowed list present', () => pm.expect(b.allowed).to.eql(['mean','min','max']));"
+        ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 400 invalid stats",
+          "status": "Bad Request",
+          "code": 400,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "{\"error\":\"Invalid stats parameter\",\"invalid\":\"avg\",\"allowed\":[\"mean\",\"min\",\"max\"]}"
+        }
+      ]
+    },
+    {
+      "name": "18) stats en raw (ignorado) => 200 sin stat en respuesta",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}&granularity=raw&stats=min,max",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" },
+            { "key": "granularity", "value": "raw" },
+            { "key": "stats", "value": "min,max" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [
+          "pm.test('Status 200', () => pm.response.to.have.status(200));",
+          "const arr = pm.response.json();",
+          "pm.test('Sin stat en items raw', () => { if (arr.length) pm.expect(arr[0]).to.not.have.property('stat'); });"
+        ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 200 raw (stats ignored)",
+          "status": "OK",
+          "code": 200,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "[{\"ts\":\"2025-09-01T00:05:00Z\",\"temperatura\":22.5,\"humedad\":50.1}]"
+        }
+      ]
+    },
+    {
+      "name": "19) Rango sin datos (=> 200 [])",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM_NO_DATA}}&to={{TO_NO_DATA}}&granularity=1h",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM_NO_DATA}}" },
+            { "key": "to", "value": "{{TO_NO_DATA}}" },
+            { "key": "granularity", "value": "1h" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [
+          "pm.test('Status 200', () => pm.response.to.have.status(200));",
+          "const arr = pm.response.json();",
+          "pm.test('Respuesta vacía', () => pm.expect(arr).to.be.an('array').that.has.lengthOf(0));"
+        ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 200 empty array",
+          "status": "OK",
+          "code": 200,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "[]"
+        }
+      ]
+    },
+    {
+      "name": "20) Nota: fallo por variables de entorno Influx faltantes (=> 500) [solo si el backend no está configurado]",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{SUPABASE_ANON_KEY}}" },
+          { "key": "Accept", "value": "application/json" }
+        ],
+        "description": "Esta prueba retornará 500 únicamente si el backend carece de INFLUX_URL/ORG/BUCKET/TOKEN. En producción correcta debería ser 200.",
+        "url": {
+          "raw": "{{BASE_URL}}/functions/v1/historic?from={{FROM}}&to={{TO}}",
+          "host": [ "{{BASE_URL}}" ],
+          "path": [ "functions", "v1", "historic" ],
+          "query": [
+            { "key": "from", "value": "{{FROM}}" },
+            { "key": "to", "value": "{{TO}}" }
+          ]
+        }
+      },
+      "event": [
+        { "listen": "test", "script": { "exec": [
+          "pm.test('Status 200 o 500 (según entorno)', () => pm.expect([200,500]).to.include(pm.response.code));",
+          "if (pm.response.code === 500) {",
+          "  const b = pm.response.json();",
+          "  pm.test('Error Internal Server Error', () => pm.expect(b.error).to.eql('Internal Server Error'));",
+          "  pm.test('Detail menciona Missing InfluxDB environment variables', () => pm.expect(String(b.detail)).to.include('Missing InfluxDB environment variables'));",
+          "}"
+        ], "type": "text/javascript" } }
+      ],
+      "response": [
+        {
+          "name": "Expected 500 (solo si faltan env Influx)",
+          "status": "Internal Server Error",
+          "code": 500,
+          "header": [ { "key": "Content-Type", "value": "application/json; charset=utf-8" } ],
+          "body": "{\"error\":\"Internal Server Error\",\"detail\":\"Error: Missing InfluxDB environment variables: INFLUX_URL, INFLUX_ORG, INFLUX_BUCKET, INFLUX_TOKEN. This function requires InfluxDB to be properly configured.\"}"
+        }
+      ]
+    }
+  ]
+}
