@@ -36,6 +36,8 @@ function buildCorsHeaders(origin: string): HeadersInit {
 
 serve(async (req: Request) => {
   const origin = req.headers.get("origin") || "";
+  const requestId = crypto.randomUUID();
+  
   try {
     // Handle CORS preflight
     if (req.method === "OPTIONS") {
@@ -46,6 +48,7 @@ serve(async (req: Request) => {
     }
 
     if (req.method !== "GET") {
+      logError("Method not allowed", undefined, { requestId, method: req.method });
       return json({ error: "Method not allowed" }, 405, buildCorsHeaders(origin));
     }
 
@@ -54,8 +57,21 @@ serve(async (req: Request) => {
     const to = url.searchParams.get("to");
     const granularity = (url.searchParams.get("granularity") || "raw").toLowerCase();
     const statsParam = url.searchParams.get("stats") || "mean";
+    
+    logInfo("Request received", {
+      requestId,
+      from,
+      to,
+      granularity,
+      stats: statsParam
+    });
 
     if (!from || !to) {
+      logError("Missing required parameters", undefined, {
+        requestId,
+        from: !!from,
+        to: !!to
+      });
       return json(
         {
           error: "Missing parameters",
@@ -69,6 +85,11 @@ serve(async (req: Request) => {
 
     const g = normalizeGranularity(granularity);
     if (!g) {
+      logError("Invalid granularity parameter", undefined, {
+        requestId,
+        granularity,
+        allowed: ["raw", "1m", "5m", "15m", "1h", "1d"]
+      });
       return json(
         {
           error: "Invalid granularity",
@@ -89,6 +110,13 @@ serve(async (req: Request) => {
         throw new Error("Invalid date format");
       }
       if (startDate >= endDate) {
+        logError("Invalid date range", undefined, {
+          requestId,
+          from,
+          to,
+          startDate: startDate.toISOString(),
+          endDate: endDate.toISOString()
+        });
         return json(
           {
             error: "Invalid range",
@@ -99,6 +127,11 @@ serve(async (req: Request) => {
         );
       }
     } catch (e) {
+      logError("Date validation failed", e, {
+        requestId,
+        from,
+        to
+      });
       return json({ error: "Invalid date(s)", detail: String(e) }, 400, buildCorsHeaders(origin));
     }
 
@@ -117,6 +150,12 @@ serve(async (req: Request) => {
       }
       for (const st of stats) {
         if (!allowed.has(st)) {
+          logError("Invalid stats parameter", undefined, {
+            requestId,
+            invalidStat: st,
+            providedStats: stats,
+            allowed: ["mean", "min", "max"]
+          });
           return json(
             {
               error: "Invalid stats parameter",
@@ -132,11 +171,18 @@ serve(async (req: Request) => {
       stats = Array.from(new Set(stats));
     }
 
-    const samples = await fetchHistoricalData(from, to, g, stats);
+    const samples = await fetchHistoricalData(from, to, g, stats, requestId);
+    
+    logInfo("Request completed successfully", {
+      requestId,
+      sampleCount: samples.length,
+      granularity,
+      stats: stats.length > 0 ? stats : undefined
+    });
 
     return json(samples, 200, buildCorsHeaders(origin));
   } catch (e) {
-    console.error("Unhandled error:", e);
+    logError("Unhandled error in request handler", e, { requestId });
     return json({ error: "Internal Server Error", detail: String(e) }, 500, buildCorsHeaders(origin));
   }
 });
@@ -153,6 +199,24 @@ const INFLUX_URL = Deno.env.get("INFLUX_URL");
 const INFLUX_ORG = Deno.env.get("INFLUX_ORG");
 const INFLUX_BUCKET = Deno.env.get("INFLUX_BUCKET");
 const INFLUX_TOKEN = Deno.env.get("INFLUX_TOKEN");
+
+/**
+ * Structured logging utility for consistent log formatting
+ */
+function logInfo(message: string, context?: Record<string, unknown>): void {
+  console.log(`[Historic] ${message}`, context || {});
+}
+
+function logError(message: string, error?: unknown, context?: Record<string, unknown>): void {
+  console.error(`[Historic] ${message}`, {
+    ...context,
+    error: error instanceof Error ? {
+      message: error.message,
+      stack: error.stack,
+      name: error.name
+    } : String(error)
+  });
+}
 
 /**
  * Creates a JSON response with proper headers
@@ -212,7 +276,8 @@ async function fetchHistoricalData(
   from: string,
   to: string,
   g: Granularity,
-  stats: string[]
+  stats: string[],
+  requestId: string
 ): Promise<StatSample[]> {
   const missingEnv: string[] = [];
   if (!INFLUX_URL) missingEnv.push("INFLUX_URL");
@@ -221,13 +286,17 @@ async function fetchHistoricalData(
   if (!INFLUX_TOKEN) missingEnv.push("INFLUX_TOKEN");
 
   if (missingEnv.length > 0) {
+    logError("Missing InfluxDB configuration", undefined, {
+      requestId,
+      missingVariables: missingEnv
+    });
     throw new Error(
       "Missing InfluxDB environment variables: " + missingEnv.join(", ") + 
       ". This function requires InfluxDB to be properly configured."
     );
   }
 
-  return await fetchFromInflux(from, to, g, stats);
+  return await fetchFromInflux(from, to, g, stats, requestId);
 }
 
 /**
@@ -237,11 +306,20 @@ async function fetchFromInflux(
   from: string,
   to: string,
   g: Granularity,
-  stats: string[]
+  stats: string[],
+  requestId: string
 ): Promise<StatSample[]> {
   const start = toRFC3339Z(from);
   const stop = toRFC3339Z(to);
   const every = granularityToFluxEvery(g);
+  
+  logInfo("Preparing InfluxDB query", {
+    requestId,
+    start,
+    stop,
+    granularity: g,
+    stats: stats.length > 0 ? stats : undefined
+  });
 
   let flux: string;
 
@@ -296,11 +374,30 @@ union(tables: [${pipelines.join(",")}])
 
   if (!resp.ok) {
     const text = await resp.text();
+    logError("InfluxDB query failed", undefined, {
+      requestId,
+      status: resp.status,
+      statusText: resp.statusText,
+      url: url.replace(/org=[^&]*/, "org=***"),
+      responseBody: text.substring(0, 500) // Limit response body size in logs
+    });
     throw new Error(`InfluxDB query failed: ${resp.status} ${resp.statusText} - ${text}`);
   }
 
+  logInfo("InfluxDB query successful", {
+    requestId,
+    status: resp.status
+  });
+
   const csv = await resp.text();
-  return parseInfluxCSV(csv, g.unit !== "raw" && stats.length > 1);
+  const samples = parseInfluxCSV(csv, g.unit !== "raw" && stats.length > 1);
+  
+  logInfo("CSV parsing completed", {
+    requestId,
+    sampleCount: samples.length
+  });
+  
+  return samples;
 }
 
 /**
