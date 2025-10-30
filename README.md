@@ -542,6 +542,7 @@ Para soporte y preguntas:
 - [DHT22 Datasheet](https://www.sparkfun.com/datasheets/Sensors/Temperature/DHT22.pdf)
 - [Supabase Documentation](https://supabase.io/docs)
 - [ESP32 Pinout Reference](https://randomnerdtutorials.com/esp32-pinout-reference-gpios/)
+- Ayuda crucial al inicio del proyecto Wandy Rodríguez 
 
 ---
 
@@ -550,5 +551,6 @@ Para soporte y preguntas:
 **Autor**: Bruno Fabián Capri
 
 **Estado**: Producción
+
 
 
